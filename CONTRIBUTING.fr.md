@@ -1,53 +1,57 @@
 # Contribuer
 
-*[English version](CONTRIBUTING.md)*
+**Français** · [English](CONTRIBUTING.md)
 
-Merci de ton intérêt pour PodCleaner-editor. Les contributions sont les bienvenues, par pull request.
+## Fonctionnement
 
-## Comment une modification entre dans le projet
+- `main` est protégée : personne n'y pousse directement, et le force-push et la suppression sont bloqués.
+- Toute modification passe par une pull request. Une PR n'est fusionnée qu'après l'approbation du mainteneur (voir [CODEOWNERS](.github/CODEOWNERS)).
+- Travaille sur une branche nommée d'après son type : `feat/silence-detection`, `fix/track-loading`, `docs/readme`.
 
-- Personne ne pousse directement sur `main`. Toute modification passe par une pull request.
-- Fais un fork du dépôt (ou une branche si tu as les droits), fais ta modification, puis ouvre une pull request vers `main`.
-- Le propriétaire du dépôt relit et approuve chaque pull request avant qu'elle soit fusionnée.
-- Les pull requests sont fusionnées en **squash and merge** : le titre de la pull request devient le message du commit sur `main`. Il doit donc suivre la convention ci-dessous.
+## Messages de commit
 
-## Convention de commit
-
-On utilise [Conventional Commits](https://www.conventionalcommits.org/fr/v1.0.0/) :
+Les commits suivent [Conventional Commits](https://www.conventionalcommits.org/fr/), écrits **en anglais puis en français**, pour que tout le monde puisse lire l'historique :
 
 ```
-<type>(<portée optionnelle>): <description courte>
+<type>(<portée optionnelle>): <English summary> / <résumé en français>
 ```
 
-| Type | À utiliser pour |
-| --- | --- |
-| `feat` | Une nouvelle fonctionnalité |
-| `fix` | Une correction de bug |
-| `docs` | La documentation seule |
-| `test` | Ajouter ou corriger des tests |
-| `refactor` | Un changement de code qui ne corrige rien et n'ajoute rien |
-| `perf` | Une amélioration des performances |
-| `build` | Le packaging, les dépendances |
-| `ci` | L'intégration continue |
-| `chore` | Le reste (outillage, entretien) |
+Un corps facultatif contient un paragraphe en anglais, une ligne vide, puis le même paragraphe en français.
 
-Exemples : `feat(silences): shorten long silences to 0.4 s`, `fix(cli): exit with code 2 when ffmpeg is missing`, `docs: translate the roadmap`.
+Types : `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`. Un changement incompatible ajoute `!` après le type (`feat!: …`) ou un pied de page `BREAKING CHANGE:`.
 
-Un changement incompatible ajoute `!` après le type (`feat!: …`) et une ligne de pied `BREAKING CHANGE:`.
+Exemples :
 
-Les messages de commit s'écrivent en anglais.
+```
+feat(silences): shorten long silences to 0.4 s / raccourcir les longs blancs à 0,4 s
+fix(cli): exit with code 2 when ffmpeg is missing / sortir avec le code 2 quand ffmpeg manque
+docs: translate the roadmap / traduire la feuille de route
+```
 
-## Noms de branche
+## Titre et description de pull request
 
-`<type>/<description-courte>`, par exemple `feat/film-clip-detection` ou `docs/readme-install`.
+- Le **titre** suit le même format qu'un titre de commit : `type: English / français`.
+- La **description** est écrite entièrement en anglais d'abord, puis entièrement en français, séparées par `---`.
+- Chaque langue commence par un **TL;DR** : 1 à 3 phrases simples qui disent ce que change la PR et pourquoi, compréhensibles sans lire le code.
 
-## Avant d'ouvrir une pull request
+Le [modèle de PR](.github/pull_request_template.md) se remplit tout seul à l'ouverture d'une PR.
 
-- Les tests passent : `uv run pytest` (et `uv run pytest -m slow` si tu as touché au code des modèles).
-- Le lint passe : `uv run ruff check` et `uv run ruff format --check`.
-- Tout nouveau comportement arrive avec ses tests, écrits avant le code.
-- Le code tourne sur macOS et Windows : utilise `pathlib` et écris les fichiers texte avec `encoding="utf-8"`.
+## Code
+
+Tout ce qui est dans le code est en anglais : identifiants, commentaires, docstrings, messages d'assertion, commentaires des fichiers de configuration. Les sorties du programme sont aussi en anglais : messages, erreurs, aide de la CLI, logs, fichier de montage et clés de la configuration.
+
+Le code tourne sur macOS et Windows : utilise `pathlib`, jamais de chemin en dur, et écris les fichiers texte avec `encoding="utf-8"`.
 
 ## Documentation
 
-La documentation existe en anglais et en français. L'anglais est la version par défaut (`nom.md`), le français est à côté (`nom.fr.md`). Si tu modifies l'une, mets l'autre à jour dans la même pull request, ou indique dans la pull request que la traduction manque pour que quelqu'un l'ajoute.
+La documentation existe en anglais et en français. Les fichiers anglais n'ont pas de suffixe (`README.md`), les fichiers français finissent par `.fr.md` (`README.fr.md`). Si tu modifies l'un, mets l'autre à jour dans la même PR, ou indique dans la PR que la traduction est à faire. Le cahier des charges a été écrit en français : [`docs/spec.fr.md`](docs/spec.fr.md) fait foi, [`docs/spec.md`](docs/spec.md) en est la traduction.
+
+## Avant d'ouvrir une PR
+
+```bash
+uv run ruff check
+uv run ruff format --check
+uv run pytest
+```
+
+Tout doit passer sur macOS et Windows ; la CI vérifie les deux. Tout nouveau comportement arrive avec ses tests, écrits avant le code.

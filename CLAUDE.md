@@ -1,0 +1,68 @@
+# podcleaner-editor
+
+CLI Python qui fait le travail répétitif du montage d'un épisode de podcast : son studio, blancs, hésitations, chevauchements, marqueurs vocaux, extraits de film, et un fichier de montage avec les timecodes pour Logic Pro. Remplace Auphonic.
+
+- Cahier des charges : `docs/spec.fr.md` (original, fait foi) · `docs/spec.md` (anglais)
+- Feuille de route : `docs/superpowers/plans/2026-11-05-roadmap.fr.md` (et `.md` en anglais)
+- Plan du jalon en cours : `docs/superpowers/plans/2026-11-05-m1-foundations-analysis.fr.md` (et `.md` en anglais)
+
+## Commandes
+
+Le code n'existe pas encore : ces commandes valent à partir de la tâche 1 du plan M1.
+
+```bash
+uv sync                    # installer
+uv run pytest              # tests rapides (sans modèle ni réseau)
+uv run pytest -m slow      # tests qui chargent un modèle (Silero, Whisper)
+uv run ruff check          # lint
+uv run ruff format         # formatage
+uv run pedit               # la CLI (alias court de podcleaner-editor)
+```
+
+Le hook `.claude/hooks/python_checks.py` lance Ruff et les tests rapides après chaque modification d'un `.py`.
+
+## Règles du dépôt
+
+- `main` est protégée : on travaille sur une branche (`feat/…`, `fix/…`, `docs/…`, `chore/…`, `test/…`, `ci/…`, `refactor/…`) et tout arrive par une pull request, approuvée par le propriétaire (CODEOWNERS).
+- Messages de commit au format Conventional Commits, **en anglais puis en français** :
+  - titre : `type(portée): English summary / résumé en français` (ex. `feat(silences): shorten long silences / raccourcir les longs blancs`) ;
+  - corps facultatif : un paragraphe en anglais, une ligne vide, le même en français.
+- Titre de PR : même format que le titre de commit (`type: English / français`).
+- Description de PR : **tout en anglais d'abord, puis tout en français**, séparés par `---`. Chaque version commence par son `## TL;DR` : 1 à 3 phrases simples qui disent ce que change la PR et pourquoi, compréhensibles sans lire le code. Suivre `.github/pull_request_template.md`.
+- Documentation en anglais (`*.md`) et en français (`*.fr.md`) : toute modification de l'une met l'autre à jour dans la même PR. Ce fichier-ci est en français uniquement.
+- Code et sorties en anglais : identifiants, commentaires, docstrings, messages affichés, erreurs, aide de la CLI, fichier de montage, clés du fichier de configuration. Seules les phrases des marqueurs vocaux (« Claude ici on veut couper »…) restent en français : ce sont des paroles à reconnaître.
+
+## Décisions du cahier des charges
+
+| Sujet | Décision |
+| --- | --- |
+| Plateformes | macOS et Windows ; chemins via `pathlib`, jamais de chemin en dur ; texte en `encoding="utf-8"` |
+| Sans Claude | Tout fonctionne sans Claude : chaque appel a un repli par règle fixe |
+| Accès à Claude | Compte intégré uniquement : CLI Claude Code connectée (abonnement), jamais de clé d'API ni de SDK `anthropic`. La CLI est lancée sans outils, sans session gardée, sans réglages ni MCP, depuis un dossier temporaire, sans `ANTHROPIC_API_KEY` ; une erreur arrête de la solliciter pour le reste du passage (même fonctionnement que podcleaner-clips) |
+| Formes d'enregistrement | `separate` : deux WAV voix + WAV film ; `mixed` : un WAV stéréo des deux voix + WAV film. Avec `mixed`, pas de chevauchements, « euh » retirés seulement sans autre parole en même temps, une seule chaîne de traitement |
+| Format des bruts | WAV uniquement |
+| Durée des épisodes | Environ 2 h 10 : analyse sur une copie mono 16 kHz, jamais l'audio pleine résolution en mémoire |
+| Blancs | Tout silence > 1 s où toutes les pistes se taisent est ramené à ~0,4 s, avec un fondu |
+| Chevauchements | Timecode seul, aucune baisse de volume |
+| Son | Mixage à -16 LUFS et -1 dBTP ; banc d'essai contre les paires brut / Auphonic |
+| Sorties | Pistes coupées aux mêmes endroits, mixage stéréo, un seul fichier de montage `.md` (Timecodes + Report), marqueurs MIDI et dans le WAV du mixage |
+| Analyses | Toujours sur l'audio original ; la carte des coupes recale les timecodes sur le final |
+| `--dry-run` | Rapport et timecodes, aucun audio écrit |
+
+## Interface de la CLI
+
+| Sujet | Décision |
+| --- | --- |
+| Paquet / commande | `podcleaner_editor` / `podcleaner-editor` et son alias `pedit` (`init`, `run`, `config [--path]`, `version`, `--version`). Installation : `uv tool install git+https://github.com/IvesPower/podcleaner-editor` |
+| Bannière | Nom en pixel art (demi-blocs, lettres #fbf2f1 sur pastille #94380c, couleurs du podcast, comme podcleaner-clips) au début de `init`, `run` et de la commande seule ; jamais hors terminal ; `--no-banner` ou `PODCLEANER_EDITOR_NO_BANNER=1` ; titre sur une ligne si le terminal est trop étroit ou ne sait pas afficher les blocs |
+| Assistant `init` | Pose les questions (dossier de sortie, forme d'enregistrement, prénoms des voix, Claude) et écrit le modèle commenté avec les réponses ; valeurs actuelles proposées par défaut, remplacement après confirmation, écriture atomique ; hors terminal ou `--no-input` : modèle commenté sans questions |
+| Configuration | TOML dans `platformdirs.user_config_dir("podcleaner-editor")/config.toml`, remplaçable par `--config` ou `PODCLEANER_EDITOR_CONFIG` |
+| Erreurs | `EditorError` : message `Error: …` sur stderr, code de sortie 2, jamais de trace Python |
+
+## Points de vigilance
+
+- **Repisse entre micros** : une voix ne compte comme active que si elle dépasse l'autre de `bleed_margin_db`.
+- **Rires et respirations** : un blanc exige aussi qu'aucune piste ne dépasse son bruit de fond + 12 dB.
+- **Temps de calcul** : on ne transcrit que les passages actifs.
+- **Reproductibilité** : les avis de Claude sont écrits dans le fichier de montage.
+- **Tests** : les tests rapides n'utilisent ni modèle ni réseau (ffmpeg est permis) ; l'audio de test est généré dans `tmp_path`, sauf les courts extraits de parole de `tests/data/`.

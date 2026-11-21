@@ -1,8 +1,8 @@
-# PodCleaner-editor
+# podcleaner-editor
 
-*[Version française](README.fr.md)*
+[Français](README.fr.md) · **English**
 
-A command-line tool that does the repetitive part of editing a podcast episode, from the raw recording to a file that is ready to finish by hand. It replaces Auphonic for audio processing and prepares the remaining manual work with timecodes.
+A command-line tool that does the repetitive part of editing a podcast episode, from the raw recording to tracks that are ready to finish by hand in Logic Pro. It replaces Auphonic for the sound and prepares the remaining manual work with timecodes.
 
 > **Status: early development.** Nothing is usable yet. The first milestone (analysis and `--dry-run` report) is in progress; see the [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md).
 
@@ -12,40 +12,61 @@ A command-line tool that does the repetitive part of editing a podcast episode, 
 - **Silences**: shortens to about 0.4 s every silence longer than 1 s where all tracks are quiet, with a fade.
 - **Hesitations**: removes isolated "uh"s that don't break the sentence, and flags the others.
 - **Overlapping speech**: marks with a timecode each time someone tries to talk over the other person without taking the floor.
-- **Voice markers**: finds spoken cues such as "Claude, cut here" or "Claude, add a clip here".
+- **Voice markers**: finds spoken cues such as "Claude ici on veut couper" ("Claude, cut here") or "Claude ici on veut ajouter un extrait" ("Claude, add a clip here").
 - **Film clips**: locates every clip played during the recording, from activity on the film track.
-- **Cut suggestions**: proposes passages to remove, with the reason (optional, uses the Claude API).
+- **Cut suggestions**: proposes passages to remove, with the reason (with Claude).
 
 `--dry-run` writes the report and timecodes without touching the audio.
 
+## Two recording layouts
+
+| Layout | You give | Notes |
+| --- | --- | --- |
+| Separate tracks | one WAV per voice + the film track WAV | everything above |
+| Mixed voices | one stereo WAV holding both voices + the film track WAV | overlaps can't be detected or cut, an "uh" is only removed when nobody else speaks at the same time, one sound chain for both voices |
+
 ## Outputs
 
-- One processed track per speaker plus the film track, all cut at the same points so they stay in sync, and a stereo mix.
+- The processed voice tracks and the film track, all cut at the same points so they stay in sync, and a stereo mix.
 - One Markdown edit file per episode: timecodes (on the original and on the final audio) and a report (loudness before and after, what was removed, what was flagged).
 - Markers as a MIDI file and inside the mix WAV, for Logic Pro and Cakewalk.
 
-## Principles
+## Commands
 
-- **Local first.** All signal processing runs locally with open source tools (ffmpeg, DeepFilterNet, Silero VAD, Whisper). No account or API key is required.
-- **Claude is optional.** With an API key, Claude reads the timestamped transcript (never the audio) to make the judgement calls where a fixed rule fails. Every opinion it gives is logged in the edit file.
-- **macOS and Windows.**
+Planned interface, available from milestone 1:
+
+```bash
+uv tool install git+https://github.com/IvesPower/podcleaner-editor
+pedit init       # a few questions, then writes your configuration file
+pedit run --voice julien.wav --voice marc.wav --film film.wav --out episode-42 --dry-run
+pedit config     # shows the configuration (--path: only where it is)
+```
+
+`podcleaner-editor` and its short alias `pedit` are the same command. In a terminal, it starts with its pixel-art title.
+
+## Claude, optional
+
+All signal processing runs locally with open source tools (ffmpeg, DeepFilterNet, Silero VAD, Whisper). With [Claude Code](https://claude.com/claude-code) installed and logged in (`claude auth login`), the tool asks Claude through your Claude subscription, never through an API key, to make the judgement calls where a fixed rule fails. Claude reads the timestamped transcript, never the audio, and every opinion it gives is logged in the edit file. Without Claude Code, fixed rules are used.
 
 ## Requirements
 
-- Python 3.11 or 3.12, managed with [uv](https://docs.astral.sh/uv/)
+- macOS or Windows
+- Python 3.11 or 3.12, with [uv](https://docs.astral.sh/uv/)
 - [ffmpeg](https://ffmpeg.org/) on the `PATH` (`brew install ffmpeg` on macOS, `winget install ffmpeg` on Windows)
-- Input: WAV files only; two voice tracks (one per person) and one film track
-
-Installation and usage instructions will come with the first release.
+- Input: WAV files only
 
 ## Documentation
 
 | Document | English | Français |
 | --- | --- | --- |
-| Project brief | [docs/spec.md](docs/spec.md) | [docs/spec.fr.md](docs/spec.fr.md) |
+| Specification | [docs/spec.md](docs/spec.md) | [docs/spec.fr.md](docs/spec.fr.md) (reference) |
 | Roadmap | [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md) | [feuille de route](docs/superpowers/plans/2026-11-05-roadmap.fr.md) |
 | Milestone 1 plan | [M1 plan](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.md) | [plan M1](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.fr.md) |
-| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) | [CONTRIBUTING.fr.md](CONTRIBUTING.fr.md) |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) | [CHANGELOG.fr.md](CHANGELOG.fr.md) |
+
+## Contributing
+
+Pull requests are welcome. `main` is protected and every PR is approved by the maintainer. Commits and PR titles follow Conventional Commits, in English then French. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
