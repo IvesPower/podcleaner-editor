@@ -5,7 +5,6 @@ __pycache__/
 build/
 dist/
 .venv/
-.python-version
 
 # Tools
 .pytest_cache/
@@ -35,6 +34,13 @@ models/
 
 # Claude Code: personal settings only
 .claude/settings.local.json
+
+# graphify: graph rebuilt locally, never committed
+graphify-out/
+*.graphify-bak
+
+# superpowers: plan execution scratch
+.superpowers/
 
 # OS / editors
 .DS_Store

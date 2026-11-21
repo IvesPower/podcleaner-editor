@@ -1,0 +1,50 @@
+[project]
+name = "podcleaner-editor"
+version = "0.1.0"
+description = "Do the repetitive part of editing a podcast episode: studio sound, silences, hesitations, timecodes for Logic Pro."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Julien Gaudet" }]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "typer",
+    "rich",  # the banner (already installed with typer)
+    "platformdirs",
+    "numpy",
+    "soundfile",
+    "silero-vad",
+    "onnxruntime",
+]
+
+[project.urls]
+Repository = "https://github.com/IvesPower/podcleaner-editor"
+
+[project.scripts]
+podcleaner-editor = "podcleaner_editor.cli:main"
+pedit = "podcleaner_editor.cli:main"  # short alias, same command
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Code blocks in the plans are sketches, not code to format.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+# Explicit: otherwise a test written before its module sorts the package as third-party.
+known-first-party = ["podcleaner_editor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: loads a model"]
+addopts = "-m 'not slow'"
