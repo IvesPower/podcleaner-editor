@@ -1,14 +1,14 @@
 # PodCleaner-editor: automated podcast editing, base idea
 
-*[Version française](spec.fr.md)*
+[Français](spec.fr.md) · **English** — translated from the French original, which remains the reference.
 
-Nov 5, 2026 · @Julien
+Nov 5, 2026 · @Julien — revised Nov 21, 2026 (stereo track with both voices, Claude through the built-in account, CLI interface)
 
 ## Context and goal
 
 The goal is a command-line tool that does the repetitive work of editing an episode, from the raw file to a file ready to finish. It replaces Auphonic for audio processing and prepares the remaining manual work with timecodes.
 
-The tool runs on macOS and Windows and will be published as open source in a Git repository. It must stay usable without an account or API key: the features that go through Claude are a bonus, not a requirement.
+The tool runs on macOS and Windows and is published as open source on GitHub. It must stay usable without Claude: the features that go through Claude are a bonus, not a requirement. Claude is reached through the built-in account (the Claude subscription, via the Claude Code CLI), never through an API key.
 
 ## Features
 
@@ -17,36 +17,65 @@ The tool runs on macOS and Windows and will be published as open source in a Git
 | Studio sound | Noise reduction, de-reverb, EQ, compression, de-esser on each track, then a mix normalised to -16 LUFS and -1 dBTP | ffmpeg, DeepFilterNet, nara\_wpe | Choosing the settings from each track's measurements |
 | Silences | Shortens to about 0.4 s every silence longer than 1 s where all tracks are quiet, with a fade | Silero VAD per track, ffmpeg | None |
 | Hesitations | Removes isolated "uh"s that don't break the sentence, flags the others | faster-whisper or mlx-whisper (word timestamps), track by track | Judging, sentence by sentence, whether a cut still sounds natural |
-| Overlapping speech | Spots a person trying to talk over the other without taking the floor; sets a timecode, the fix is done by hand | Overlaps detected by VAD on each track | Discarding backchannels ("yes", "mmh") and laughs to flag only real attempts |
+| Overlapping speech | Spots a person trying to talk over the other without taking the floor; sets a timecode, the fix is done by hand. Only with one track per voice | Overlaps detected by VAD on each track | Discarding backchannels ("yes", "mmh") and laughs to flag only real attempts |
 | Voice markers | Spots "Claude ici on veut couper" ("Claude, cut here") and "Claude ici on veut ajouter un extrait" ("Claude, add a clip here") | Whisper + fuzzy search (rapidfuzz) | Recognising variations in wording |
 | Film clips | Spots each clip played, from activity on the film track | Activity detection on the dedicated track | None |
 | Cut suggestions | Proposes passages to remove, with the reason | None | Reading the transcript, guided by examples from already-edited episodes |
 
 `--dry-run` mode writes the report and the timecodes without changing the audio, to validate the settings on the first episodes.
 
+## Accepted recording layouts
+
+An episode comes in one of two layouts, always with the film track on its own:
+
+| Layout | Files | What changes |
+| --- | --- | --- |
+| Separate tracks (`separate`) | One WAV per voice (two) + the film track WAV | All the processing described here |
+| Mixed voices (`mixed`) | One stereo WAV holding both voices + the film track WAV | See below |
+
+With mixed voices, the two people cannot be told apart:
+
+- **Overlaps**: neither detected nor cut. The report says they are not available for this episode.
+- **Hesitations**: an "uh" is removed only if nobody else speaks at the same time (no other transcribed word inside the cut window); otherwise it is only flagged.
+- **Studio sound**: a single processing chain, tuned for both voices together.
+- **Silences, voice markers, film clips, suggestions**: unchanged.
+- **Outputs**: the processed voices track and the film track, cut at the same points, plus the stereo mix.
+
+The layout comes from the number of voice files given to the command (one or two), or from the answer given to the `init` wizard.
+
 ## Architecture
 
-The program is a Python CLI that does all processing locally. Claude is added in two places, always optional: the API for decisions that need judgement, and skills to drive the tool in natural language.
+The program is a Python CLI that does all processing locally. Claude is added in two places, always optional: the Claude Code CLI in non-interactive mode (`claude -p`, with the person's subscription) for decisions that need judgement, and skills to drive the tool in natural language.
 
 *Architecture diagram: local core, two optional Claude layers (see the list below).*
 
-Dotted lines mark what is optional. Without an API key, the Decisions step applies fixed rules only.
+Dotted lines mark what is optional. Without a logged-in Claude Code, the Decisions step applies fixed rules only.
 
 - **Open source tools keep the signal processing.** Claude does not listen to the audio: it reads the timestamped transcript and the measurements. Noise reduction, normalisation and cuts stay in ffmpeg and the local models, which makes them free and reproducible.
 - **Claude steps in where a rule fails.** Knowing whether an "uh" can go without breaking the sentence, recognising a badly transcribed marker, spotting an off-topic passage: these are judgements about meaning, not about the signal.
+- **Claude goes through the built-in account.** The program runs the installed, logged-in Claude Code CLI (`claude auth login`), with no tools, no saved session, no settings or MCP, from a temporary folder, and with no `ANTHROPIC_API_KEY` in its environment. If the CLI is missing, not logged in or returns an error, the program carries on with the fixed rules and says so.
 - **Skills wrap the CLI, they don't replace it.** A skill only runs in Claude Code. The CLI must therefore work on its own, for the repository's contributors and for automation. The repository's `skills/` folder then holds skills that call it: full edit, report review, tuning a difficult episode.
 
 Points to watch, for episodes of about 2 h 10:
 
 - **Processing time.** Each track is 2 h 10 long. Only the passages where the track is active are transcribed, which cuts the volume a lot. On an Apple Silicon Mac or a PC with an NVIDIA card it is reasonable; on a CPU only, plan to start the processing and let it run.
 - **Size sent to Claude.** For cut suggestions, the sentence-level timestamped transcript of a whole episode fits in one call. To judge the "uh"s, only the sentence around each candidate is sent, without the word timestamps of the whole episode.
-- **Cost per episode**, to be measured on the first test episode.
+- **Subscription use per episode** (number of calls, time), to be measured on the first test episode.
 - **Reproducibility**: the opinions Claude gives are logged in the edit file.
+
+## Command-line interface
+
+- **Name**: `podcleaner-editor`, with the short alias `pedit`. Install: `uv tool install git+https://github.com/IvesPower/podcleaner-editor`.
+- **Commands**: `init`, `run`, `config [--path]`, `version` (and `--version`). The command alone prints the help.
+- **Banner**: the name in pixel art in the podcast's colours (cream #fbf2f1 letters on a rust #94380c badge, as in podcleaner-clips) at the start of `init`, `run` and the command alone; never outside a terminal; `--no-banner` or `PODCLEANER_EDITOR_NO_BANNER=1`; a one-line title when the terminal is too narrow or cannot draw the blocks.
+- **`init` wizard**: asks the questions in the console (output folder, recording layout, first names of the two voices, Claude yes or no, checking that Claude Code is logged in) and writes the commented configuration file with the answers; offers the current values as defaults; replaces an existing file after confirmation. Outside a terminal or with `--no-input`: the commented template, without questions.
+- **Configuration**: one TOML file per person, in the user's configuration folder, overridable with `--config` or `PODCLEANER_EDITOR_CONFIG`; no hard-coded path.
+- **Progress**: one line per step during `run`, then the paths of the files written.
 
 ## Outputs
 
-- **Final tracks**: one processed track per person and the film track, cut at the same points to stay in sync, ready to drop into the editing software. A stereo mix is also produced.
-- **Edit file (.md)**: a single Markdown file per episode, in two parts.
+- **Final tracks**: one processed track per person (or the voices track, when they come mixed) and the film track, cut at the same points to stay in sync, ready to drop into the editing software. A stereo mix is also produced.
+- **Edit file (.md)**: a single Markdown file per episode, in English, in two parts.
   - Timecodes: each event with its type (requested cut, clip to add, film clip, overlap, suggestion), the timecode on the original audio and on the final audio, and the reason.
   - Report: measurements before and after (LUFS, true peak) per track, the number of silences and hesitations removed, the "uh"s flagged but not cut, and the opinions Claude gave.
 - **Markers**: a MIDI file that contains only the markers, and the same markers written into the mix WAV. Logic Pro and Cakewalk can read one or the other; the right format is to be confirmed by testing in each application.
@@ -55,20 +84,22 @@ All analysis runs on the original audio. The program keeps the cut map to remap 
 
 ## Out of scope, decisions and open questions
 
-The first version does not do the creative editing (choice of clips, order of sequences, sound design) nor the publication of the episode.
+The first version does not do the creative editing (choice of clips, order of sequences, sound design) nor the publication of the episode. Nor does it separate two voices recorded together.
 
 | Topic | Decision |
 | --- | --- |
-| Recording | Always two people, one track each, plus the film track |
+| Recording | Always two people, plus the film track on its own: one track per person, or one stereo track holding both voices |
 | Raw format | WAV only, at the best recording quality |
 | Episode length | About 2 h 10 |
 | Film clips | Played live during the recording, on a separate track |
 | Editing software | Logic Pro |
 | Sound reference | Several raw episodes with their Auphonic-processed version |
 | Style reference | Several dozen hours of edited episodes, with their raw recordings without the film clips |
-| Overlaps | Timecode only, no automatic volume reduction |
+| Overlaps | Timecode only, no automatic volume reduction; no detection with mixed voices |
 | Output file | A single .md per episode: timecodes and report |
-| Claude API | The transcript may be sent to it |
+| Access to Claude | Built-in account: the logged-in Claude Code CLI, with the subscription; never an API key. The transcript may be sent to it |
+| Program language | English: messages, errors, help, edit file, configuration keys. Voice markers stay sentences spoken in French |
+| Documentation language | English (`name.md`) and French (`name.fr.md`), updated together; this specification's French version is the reference |
 
 The raw / Auphonic pairs serve as a test bench: each version of the processing is measured against them (loudness, spectrum, background noise) before it is released.
 
@@ -94,9 +125,9 @@ The project is developed in Claude Code with a few general-purpose plugins, thre
 Skills to write for the project, versioned in `.claude/skills/`:
 
 - **Auphonic comparison**: processes a reference episode and compares the output with the Auphonic version (LUFS, true peak, spectrum, background noise).
-- **Quick test**: runs the whole chain on a 10-minute excerpt of the two tracks and the film track, to check a change without processing 2 h 10.
+- **Quick test**: runs the whole chain on a 10-minute excerpt of the voice tracks and the film track, to check a change without processing 2 h 10.
 - **Windows compatibility**: checks paths, the presence of ffmpeg and file encoding before each release.
 
-A `CLAUDE.md` file at the root restates the decisions of this document. Claude Code reads it at the start of each session.
+A `CLAUDE.md` file at the root restates the decisions of this document and the repository rules. Claude Code reads it at the start of each session.
 
 Sources: [Dupple, best Claude Code skills 2026](https://dupple.com/learn/best-claude-code-skills-2026) · [Redwerk, best Claude Code plugins 2026](https://redwerk.com/blog/best-claude-code-plugins/)

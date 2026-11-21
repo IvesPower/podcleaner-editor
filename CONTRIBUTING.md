@@ -1,53 +1,57 @@
 # Contributing
 
-*[Version française](CONTRIBUTING.fr.md)*
+[Français](CONTRIBUTING.fr.md) · **English**
 
-Thanks for your interest in PodCleaner-editor. Contributions are welcome through pull requests.
+## Workflow
 
-## How changes get in
+- `main` is protected: nobody pushes to it directly, and force-pushes and deletion are blocked.
+- Every change goes through a pull request. A PR is merged only after the maintainer approves it (see [CODEOWNERS](.github/CODEOWNERS)).
+- Work on a branch named after its type: `feat/silence-detection`, `fix/track-loading`, `docs/readme`.
 
-- Nobody pushes to `main` directly. Every change goes through a pull request.
-- Fork the repository (or create a branch if you have access), make your change, and open a pull request against `main`.
-- The repository owner reviews and approves every pull request before it is merged.
-- Pull requests are merged with **squash and merge**, so the pull request title becomes the commit message on `main`. It must follow the convention below.
+## Commit messages
 
-## Commit convention
-
-We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/), written **in English, then in French**, so that everyone can read the history:
 
 ```
-<type>(<optional scope>): <short description>
+<type>(<optional scope>): <English summary> / <résumé en français>
 ```
 
-| Type | Use it for |
-| --- | --- |
-| `feat` | A new feature |
-| `fix` | A bug fix |
-| `docs` | Documentation only |
-| `test` | Adding or fixing tests |
-| `refactor` | Code change that neither fixes a bug nor adds a feature |
-| `perf` | Performance improvement |
-| `build` | Packaging, dependencies |
-| `ci` | Continuous integration |
-| `chore` | Anything else (tooling, housekeeping) |
+An optional body has one paragraph in English, a blank line, then the same paragraph in French.
 
-Examples: `feat(silences): shorten long silences to 0.4 s`, `fix(cli): exit with code 2 when ffmpeg is missing`, `docs: translate the roadmap`.
+Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`. A breaking change adds `!` after the type (`feat!: …`) or a `BREAKING CHANGE:` footer.
 
-A breaking change adds `!` after the type (`feat!: …`) and a `BREAKING CHANGE:` footer.
+Examples:
 
-Commit messages are written in English.
+```
+feat(silences): shorten long silences to 0.4 s / raccourcir les longs blancs à 0,4 s
+fix(cli): exit with code 2 when ffmpeg is missing / sortir avec le code 2 quand ffmpeg manque
+docs: translate the roadmap / traduire la feuille de route
+```
 
-## Branch names
+## Pull request title and description
 
-`<type>/<short-description>`, for example `feat/film-clip-detection` or `docs/readme-install`.
+- The **title** uses the same format as a commit title: `type: English / français`.
+- The **description** is written entirely in English first, then entirely in French, separated by `---`.
+- Each language starts with a **TL;DR**: 1 to 3 plain sentences saying what the PR changes and why, understandable without reading the code.
 
-## Before opening a pull request
+The [PR template](.github/pull_request_template.md) is filled in automatically when you open a PR.
 
-- Tests pass: `uv run pytest` (and `uv run pytest -m slow` if you touched model code).
-- Lint passes: `uv run ruff check` and `uv run ruff format --check`.
-- New behaviour comes with tests written first.
-- The code runs on macOS and Windows: use `pathlib`, and write text files with `encoding="utf-8"`.
+## Code
+
+Everything in the code is in English: identifiers, comments, docstrings, assertion messages, comments in configuration files. The program's output is in English too: messages, errors, CLI help, logs, the edit file and the configuration keys.
+
+The code runs on macOS and Windows: use `pathlib`, never a hard-coded path, and write text files with `encoding="utf-8"`.
 
 ## Documentation
 
-Documentation exists in English and French. English is the default (`name.md`), French sits next to it (`name.fr.md`). If you change one, update the other in the same pull request, or say in the pull request that the translation is missing so someone can add it.
+Docs exist in English and French. English files have no suffix (`README.md`), French files end in `.fr.md` (`README.fr.md`). When you change one, update the other in the same PR, or say in the PR that the translation is pending. The specification was written in French: [`docs/spec.fr.md`](docs/spec.fr.md) is the reference, [`docs/spec.md`](docs/spec.md) its translation.
+
+## Before opening a PR
+
+```bash
+uv run ruff check
+uv run ruff format --check
+uv run pytest
+```
+
+All must pass on macOS and Windows; CI checks both. New behaviour comes with tests written first.
