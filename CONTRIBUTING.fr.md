@@ -46,6 +46,18 @@ Le code tourne sur macOS et Windows : utilise `pathlib`, jamais de chemin en dur
 
 La documentation existe en anglais et en français. Les fichiers anglais n'ont pas de suffixe (`README.md`), les fichiers français finissent par `.fr.md` (`README.fr.md`). Si tu modifies l'un, mets l'autre à jour dans la même PR, ou indique dans la PR que la traduction est à faire. Le cahier des charges a été écrit en français : [`docs/spec.fr.md`](docs/spec.fr.md) fait foi, [`docs/spec.md`](docs/spec.md) en est la traduction.
 
+## Travailler avec Claude Code (graphify)
+
+Le dépôt contient une configuration [graphify](https://github.com/Graphify-Labs/graphify) pour Claude Code : un graphe de connaissances du code que Claude interroge au lieu de relire les fichiers, ce qui réduit le contexte de chaque session. Le code est analysé en local avec tree-sitter ; rien n'est envoyé sur le réseau.
+
+```bash
+uv tool install graphifyy    # une fois par machine (le paquet s'écrit avec deux y)
+graphify update .            # construire ou rafraîchir le graphe dans graphify-out/ (non versionné)
+graphify hook install        # facultatif : reconstruire le graphe après chaque commit et changement de branche
+```
+
+Les hooks Claude Code de `.claude/settings.json` appellent `graphify` : s'il n'est pas installé, Claude Code affiche une erreur de hook non bloquante et fonctionne normalement.
+
 ## Avant d'ouvrir une PR
 
 ```bash
