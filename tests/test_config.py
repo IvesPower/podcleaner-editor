@@ -138,3 +138,20 @@ def test_template_comments_every_key():
     for i, line in enumerate(lines):
         if "=" in line and not line.startswith("#"):
             assert lines[i - 1].startswith("# "), line
+
+
+def test_filler_words_read_from_toml(tmp_path):
+    path = _write(tmp_path / "c.toml", '[hesitations]\nwords = ["euh", "bah"]\n')
+    assert load_settings(path).filler_words == ("euh", "bah")
+
+
+@pytest.mark.parametrize("words", ["[]", '["euh", 3]', '["euh", " "]', '"euh"'])
+def test_filler_words_must_be_non_empty_strings(tmp_path, words):
+    path = _write(tmp_path / "c.toml", f"[hesitations]\nwords = {words}\n")
+    with pytest.raises(EditorError, match=r"\[hesitations\] words"):
+        load_settings(path)
+
+
+def test_template_round_trips_new_settings(tmp_path):
+    path = _write(tmp_path / "c.toml", render_template(settings_values(Settings())))
+    assert load_settings(path) == Settings()
