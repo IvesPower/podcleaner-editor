@@ -3,10 +3,12 @@
 from dataclasses import dataclass
 from datetime import date
 
+from podcleaner_editor.analysis.transcribe import TranscriptionInfo
 from podcleaner_editor.cutmap import CutMap
+from podcleaner_editor.detect.fillers import Filler
 from podcleaner_editor.episode import Episode
 from podcleaner_editor.events import Event, EventType
-from podcleaner_editor.timeline import format_tc
+from podcleaner_editor.timeline import Interval, format_tc, merge
 
 _LAYOUT_NAMES = {"separate": "separate tracks", "mixed": "mixed voices"}
 
@@ -17,6 +19,15 @@ class AnalysisResult:
     events: list[Event]
     silence_cuts: CutMap
     dry_run: bool
+    fillers: tuple[Filler, ...] = ()
+    marker_cuts: tuple[Interval, ...] = ()
+    transcription: TranscriptionInfo | None = None
+
+    @property
+    def cuts(self) -> CutMap:
+        """Every cut: silences, cut hesitations and marker phrases."""
+        filler_cuts = [f.cut for f in self.fillers if f.cut is not None]
+        return CutMap(tuple(merge([*self.silence_cuts.cuts, *filler_cuts, *self.marker_cuts])))
 
 
 def _cell(text: str) -> str:
@@ -41,7 +52,7 @@ def _timecodes(result: AnalysisResult) -> list[str]:
             str(event.type),
             _cell(event.track),
             format_tc(event.start),
-            format_tc(result.silence_cuts.to_final(event.start)),
+            format_tc(result.cuts.to_final(event.start)),
             format_tc(event.end - event.start),
             _cell(event.reason),
         ]
@@ -67,13 +78,74 @@ def _tracks(episode: Episode) -> list[str]:
     return lines
 
 
-def _silences(result: AnalysisResult) -> str:
-    cuts = result.silence_cuts
+def _duration(result: AnalysisResult) -> str:
+    cuts = result.cuts
     total = result.episode.duration
     return (
-        f"{_plural(len(cuts.cuts), 'silence')} shortened, {format_tc(cuts.removed())} removed. "
         f"Final duration: {format_tc(cuts.final_duration(total))} "
-        f"(original: {format_tc(total)})."
+        f"(original: {format_tc(total)}), {format_tc(cuts.removed())} removed."
+    )
+
+
+def _silences(result: AnalysisResult) -> str:
+    cuts = result.silence_cuts
+    return f"{_plural(len(cuts.cuts), 'silence')} shortened, {format_tc(cuts.removed())} removed."
+
+
+_NOT_TRANSCRIBED = "Not available: the episode was not transcribed."
+
+
+def _hesitations(result: AnalysisResult) -> list[str]:
+    if result.transcription is None:
+        return [_NOT_TRANSCRIBED]
+    cut = [f.cut for f in result.fillers if f.cut is not None]
+    flagged = sorted((f for f in result.fillers if f.cut is None), key=lambda f: f.word.start)
+    removed = format_tc(sum(c.end - c.start for c in cut))
+    head = f"{_plural(len(cut), 'hesitation')} removed ({removed}), {len(flagged)} flagged"
+    if not flagged:
+        return [head + "."]
+    lines = [
+        head + ":",
+        "",
+        "| Original | Final | Track | Context | Reason |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for filler in flagged:
+        start = filler.word.start
+        cells = [
+            format_tc(start),
+            format_tc(result.cuts.to_final(start)),
+            _cell(filler.track),
+            _cell(filler.context),
+            _cell(filler.reason),
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
+    return lines
+
+
+def _markers(result: AnalysisResult) -> str:
+    if result.transcription is None:
+        return _NOT_TRANSCRIBED
+    cut_requests = sum(1 for e in result.events if e.type == EventType.CUT_REQUEST)
+    clips = sum(1 for e in result.events if e.type == EventType.CLIP_TO_ADD)
+    if cut_requests + clips == 0:
+        return "No spoken markers."
+    removed = format_tc(sum(c.end - c.start for c in result.marker_cuts))
+    clip_text = f"{clips} clip to add" if clips == 1 else f"{clips} clips to add"
+    return (
+        f"{_plural(cut_requests + clips, 'spoken marker')}: "
+        f"{_plural(cut_requests, 'requested cut')}, {clip_text}; "
+        f"{_plural(len(result.marker_cuts), 'phrase')} removed ({removed})."
+    )
+
+
+def _transcription(result: AnalysisResult) -> str:
+    info = result.transcription
+    if info is None:
+        return "None."
+    return (
+        f"{info.backend} · {format_tc(info.speech_s)} of speech transcribed · "
+        f"{info.cached_tracks} of {len(result.episode.voices)} tracks from the cache."
     )
 
 
@@ -99,6 +171,10 @@ def render_edit_file(result: AnalysisResult, version: str, generated_on: date) -
         "",
         "## Report",
         "",
+        "### Duration",
+        "",
+        _duration(result),
+        "",
         "### Tracks",
         "",
         *_tracks(episode),
@@ -107,9 +183,21 @@ def render_edit_file(result: AnalysisResult, version: str, generated_on: date) -
         "",
         _silences(result),
         "",
+        "### Hesitations",
+        "",
+        *_hesitations(result),
+        "",
+        "### Markers",
+        "",
+        _markers(result),
+        "",
         "### Overlaps",
         "",
         _overlaps(result),
+        "",
+        "### Transcription",
+        "",
+        _transcription(result),
         "",
         "### Claude's opinions",
         "",
