@@ -37,7 +37,7 @@ Le hook `.claude/hooks/python_checks.py` lance Ruff et les tests rapides après 
 - Titre de PR : même format que le titre de commit (`type: English / français`).
 - Description de PR : **tout en anglais d'abord, puis tout en français**, séparés par `---`. Chaque version commence par son `## TL;DR` : 1 à 3 phrases simples qui disent ce que change la PR et pourquoi, compréhensibles sans lire le code. Suivre `.github/pull_request_template.md`.
 - Documentation en anglais (`*.md`) et en français (`*.fr.md`) : toute modification de l'une met l'autre à jour dans la même PR. Ce fichier-ci est en français uniquement.
-- Code et sorties en anglais : identifiants, commentaires, docstrings, messages affichés, erreurs, aide de la CLI, fichier de montage, clés du fichier de configuration. Seules les phrases des marqueurs vocaux (« Claude ici on veut couper »…) restent en français : ce sont des paroles à reconnaître.
+- Code et sorties en anglais : identifiants, commentaires, docstrings, messages affichés, erreurs, aide de la CLI, fichier de montage, clés du fichier de configuration. Seuls les mots des marqueurs vocaux (le déclencheur « Claude » et les verbes d'action « couper », « ajouter »…), les mots d'hésitation et l'invite de Whisper restent en français : ce sont des paroles à reconnaître.
 
 ## Décisions du cahier des charges
 
@@ -77,8 +77,10 @@ Le hook `.claude/hooks/python_checks.py` lance Ruff et les tests rapides après 
 | `[overlaps] merge_gap_s` | 0,5 s | Une pause de 0,3 s de Julien ne termine pas son tour |
 | `[levels] own_speech_gap_s` | 0,2 s | Le filtre de repisse, trame par trame, coupe entre les syllabes |
 | Bruit de fond | silence numérique exclu | Sinon plancher à -120 dB et chaque souffle compte comme un son fort |
+| Marqueurs vocaux (`[markers]`) | déclencheur « Claude » en début de phrase (ou après « dis ») + verbe d'action (`cut_words`, `clip_words`) ; `min_score` 80, `pause_s` 0,5 s, `max_s` 15 s | Sur l'enregistrement de test, Julien donne des consignes parlées (« Dis Claude, on va couper ce passage-là… »), pas des phrases fixes ; règle choisie par Julien le 22 nov. 2026 |
+| Hésitations (`[hesitations]`) | valeurs par défaut | Les 6 « euh » trouvés sont tous ceux que Julien entend |
 
-Résultat attendu : 3 chevauchements (47,7 s, 50,2 s, 50,8 s), 1 extrait de film (62,3 – 67,4 s), 5 blancs raccourcis (6,8 s retirées) ; vérifié par les tests lents de `tests/test_pipeline.py`.
+Résultat attendu : 3 chevauchements (47,7 s, 50,2 s, 50,8 s), 1 extrait de film (62,3 – 67,4 s), 3 marqueurs (18,7 s Clip to add, 27,6 s Requested cut, 40,3 s Requested cut, consignes coupées), 3 « euh » coupés sur Julien (13,2 s, 26,9 s, 39,7 s) et 3 signalés sur Franck (48,0 s, 50,9 s, 51,3 s, parole de Julien en même temps), 6 blancs raccourcis (6,9 s retirées, hors parties déjà retirées avec les consignes et les « euh » ; 5 blancs et 6,8 s au M1) ; vérifié par les tests lents de `tests/test_pipeline.py`.
 
 ## Points de vigilance
 

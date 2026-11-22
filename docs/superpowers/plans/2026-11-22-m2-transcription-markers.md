@@ -4,7 +4,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `pedit run … --dry-run` also transcribes each voice's active passages (word timestamps), finds the spoken markers ("Claude ici on veut couper", "Claude ici on veut ajouter un extrait") and the "euh"s, decides which "euh"s and marker phrases can be cut, and writes all of it into the edit file, with final timecodes that already account for those cuts.
+**Goal:** `pedit run … --dry-run` also transcribes each voice's active passages (word timestamps), finds the spoken instructions to Claude ("Dis Claude, on va couper ce passage-là."; first planned as fixed phrases such as "Claude ici on veut couper") and the "euh"s, decides which "euh"s and marker phrases can be cut, and writes all of it into the edit file, with final timecodes that already account for those cuts.
 
 **Architecture:** transcription is an edge module (`analysis/transcribe.py`: mlx-whisper on Apple silicon, faster-whisper elsewhere, adapted from podcleaner-clips `transcribe.py`) behind a `Transcriber` protocol, so the pipeline can be tested with a fake one. Everything after it is pure functions over `Word` and `Interval` lists (`detect/fillers.py`, `detect/markers.py`). Each voice is transcribed on its own speech only (bleed filter from M1), and its words are cached in `<out>/<name>.words.json` so a second `--dry-run` with other settings does not transcribe again. Cuts of hesitations and marker phrases join the silence cuts in one cut map; the silences are computed after those cuts are taken out of the activity, so an "euh" between two pauses leaves one short pause, not a long one.
 
@@ -19,10 +19,10 @@
 - Without Claude, everything works with fixed rules; M2 makes no call to Claude.
 - Rule for an "euh" (chosen by Julien on 22 Nov 2026, "wide"): every standalone hesitation word is cut, unless another word or the other voice's speech falls inside its cut window, or a film clip does, or it lasts more than `filler_max_s`; those are flagged, never cut. Claude (M5) will be able to undo a cut.
 - Mixed layout: an "euh" is a cut candidate only if no other transcribed word overlaps the cut window (spec).
-- Spoken markers: a `Requested cut` or `Clip to add` event in the Timecodes, and the phrase itself is cut from the audio (chosen by Julien on 22 Nov 2026), under the same "no other speech, no film" condition.
+- Spoken markers: an instruction that starts with "Claude" at the start of a sentence and holds an action word (rule changed by Julien on 22 Nov 2026 after the test recording, instead of fixed phrases) gives a `Requested cut` or `Clip to add` event in the Timecodes, and the instruction itself is cut from the audio (chosen by Julien on 22 Nov 2026), under the same "no other speech, no film" condition.
 - Cuts are the same on every track: any cut (silence, "euh", marker) is blocked by speech on any other track.
 - `--dry-run` still writes no audio; the words cache (JSON) is allowed.
-- French text allowed in code and configuration only for speech to recognize: the marker phrases, the filler words and the Whisper prompt.
+- French text allowed in code and configuration only for speech to recognize: the marker trigger and action words, the filler words and the Whisper prompt.
 - Fast tests load no model and use no network; tests that load Whisper are marked `slow` and skip when `samples/pedit` is absent.
 - Model download on first run (~1.6 GB from Hugging Face) is announced in the progress line.
 
@@ -74,10 +74,13 @@ tests/test_fillers.py, test_markers.py          + test_config, test_timeline, te
 | `filler_pad_s: float` | `0.05` | `[hesitations] pad_s` | Margin cut around a hesitation (seconds). |
 | `filler_max_s: float` | `1.5` | `[hesitations] max_s` | Longer hesitations are flagged, not cut (seconds). |
 | `filler_snap_s: float` | `0.08` | `[hesitations] snap_s` | How far a cut edge may move to the quietest point (seconds). |
-| `marker_cut_phrase: str` | `"claude ici on veut couper"` | `[markers] cut` | Phrase that asks for a cut. |
-| `marker_clip_phrase: str` | `"claude ici on veut ajouter un extrait"` | `[markers] clip` | Phrase that asks for a clip to be added. |
-| `marker_min_score: float` | `85.0` | `[markers] min_score` | Lowest similarity (0 to 100) for a heard phrase to count. |
-| `marker_pad_s: float` | `0.1` | `[markers] pad_s` | Margin cut around a marker phrase (seconds). |
+| `marker_trigger: str` | `"claude"` | `[markers] trigger` | Word that opens a spoken instruction, at the start of a sentence. |
+| `marker_cut_words: tuple[str, ...]` | `("couper", "coupe", "supprimer", "supprime", "enlever", "enleve", "retirer", "retire")` | `[markers] cut_words` | Words that make an instruction a cut. |
+| `marker_clip_words: tuple[str, ...]` | `("ajouter", "ajoute", "extrait", "inserer", "insere")` | `[markers] clip_words` | Words that make an instruction a clip to add. |
+| `marker_min_score: float` | `80.0` | `[markers] min_score` | Lowest similarity (0 to 100) for a heard word to count as the trigger. |
+| `marker_pause_s: float` | `0.5` | `[markers] pause_s` | A pause this long starts or ends an instruction (seconds). |
+| `marker_max_s: float` | `15.0` | `[markers] max_s` | Longest instruction (seconds). |
+| `marker_pad_s: float` | `0.1` | `[markers] pad_s` | Margin cut around an instruction (seconds). |
 
 - [ ] **Step 1:** dependencies: `"mlx-whisper ; sys_platform == 'darwin' and platform_machine == 'arm64'"`, `"faster-whisper ; sys_platform != 'darwin' or platform_machine != 'arm64'"`, `"rapidfuzz"`; `uv lock`.
 - [ ] **Step 2: failing tests**
@@ -214,25 +217,31 @@ def test_long_euh_is_flagged(): ...                       # 2.0 s → "Too long 
 - Create: `src/podcleaner_editor/detect/markers.py`, `tests/test_markers.py`
 
 **Interfaces:**
-- Consumes: `Word`, `normalize`, `cut_window`, `snap_to_quiet`, `blocking_reason` (task 4), `Event`, `EventType`, `Settings`, `rapidfuzz.fuzz.ratio`.
+- Consumes: `Word`, `normalize`, `word_cut_window`, `blocking_reason`, `OTHER_SPEECH` (task 4), `Event`, `EventType`, `Settings`, `rapidfuzz.fuzz.ratio`.
 - Produces: `@dataclass(frozen=True) class Marker: event: Event; cut: Interval | None`; `find_markers(words: list[Word], track: str, other_speech: list[Interval], film: list[Interval], levels: np.ndarray, settings: Settings) -> list[Marker]`, sorted by time.
-  Rule: the track's words become tokens (`normalize`, split; each token remembers its word). For each phrase (`marker_cut_phrase` → `CUT_REQUEST`, `marker_clip_phrase` → `CLIP_TO_ADD`) with `n` tokens, every window of `n - 1`, `n` or `n + 1` consecutive tokens is a candidate when `fuzz.ratio(window text, phrase) >= marker_min_score` **and** `fuzz.ratio(last window token, last phrase token) >= 70` (the distinctive word: "couper", "extrait"). Candidates are kept greedily by score, best first, skipping any that shares a word with one already kept. Event: `start`/`end` = first and last word of the window, `track`, reason `'Spoken marker "<heard words as transcribed>" (score <int>)'`. Cut: same as a hesitation with `marker_pad_s`; if `blocking_reason` returns a reason, `cut = None` and the event reason ends with `"; phrase kept: <reason>"`.
+  Rule (changed by Julien on 22 Nov 2026 after the test recording, where he gives spoken instructions rather than fixed phrases; the first version matched `marker_cut_phrase` / `marker_clip_phrase` with fuzzy scores):
+  - Trigger: a word whose first token (`normalize`) has `fuzz.ratio(token, marker_trigger) >= marker_min_score`, at a sentence start: the track's first word, or the previous word ends with `.`, `?`, `!` or `…`, or the gap since the previous word is ≥ `marker_pause_s`, or the previous token is "dis" (then "dis" joins the instruction).
+  - The instruction runs from there to the first word that ends a sentence or is followed by a gap ≥ `marker_pause_s`, at most `marker_max_s` long.
+  - It is a marker only if it holds an action word: the first token found in `marker_cut_words` gives `CUT_REQUEST`, in `marker_clip_words` gives `CLIP_TO_ADD`.
+  - Event: `start`/`end` = first and last word of the instruction, `track`, reason `'Spoken instruction: "<words as transcribed>"'`. Cut: `word_cut_window` with `marker_pad_s`; blocked (`cut = None`, reason ends `"; instruction kept: <reason>"`) by `blocking_reason`, or, as `"Other speech at the same time"`, by another word of the same track inside the window or two of the instruction's words overlapping (mixed layout).
 
 - [ ] **Step 1: failing tests**
 
 ```python
-def test_cut_marker_with_punctuation():
-    words = _words("bon Claude, ici on veut couper ! alors")
-    [m] = find_markers(words, "Julien", [], [], quiet_levels, SETTINGS)
-    assert m.event.type == EventType.CUT_REQUEST and m.event.track == "Julien"
-    assert (m.event.start, m.event.end) == (words[1].start, words[5].end) and m.cut is not None
-
-def test_clip_marker_is_not_also_a_cut(): ...             # "claude ici on veut ajouter un extrait" → one CLIP_TO_ADD only
-def test_misheard_word_still_matches(): ...                # "clode ici on veut couper" → CUT_REQUEST
-def test_dropped_word_still_matches(): ...                 # "claude on veut couper" → CUT_REQUEST
-def test_sentence_that_starts_like_a_marker_is_ignored():  # "claude ici on veut du café" → []
-def test_two_markers_in_a_row(): ...                       # both phrases one after the other → 2 markers
-def test_marker_under_other_speech_is_kept_in_audio(): ... # cut None, reason ends "; phrase kept: Other speech at the same time"
+def test_dis_claude_ajoute_is_a_clip_to_add(): ...        # "Dis Claude, ici il faudrait qu'on ajoute un passage de son…" → CLIP_TO_ADD
+def test_dis_claude_on_va_couper_is_a_cut(): ...          # "dis Claude, on va couper ce passage-là, les dix dernières secondes." → CUT_REQUEST
+def test_dis_claude_supprimer_is_a_cut(): ...             # "dis Claude, est-ce que tu peux supprimer la phrase juste avant…" → CUT_REQUEST
+def test_spec_phrase_after_a_pause(): ...                 # pause, "Claude ici on veut couper" → CUT_REQUEST
+def test_claude_mid_sentence_is_ignored(): ...            # "j'ai demandé à Claude de couper ça." → []
+def test_instruction_without_action_word_is_ignored(): ...  # "Bon. Claude, tu es là ?" → []
+def test_misheard_trigger_still_found(): ...              # "Cloude" (score 83) → found; "Clode" (73) → []
+def test_instruction_ends_at_a_pause(): ...
+def test_instruction_capped_at_max_s(): ...
+def test_two_instructions_in_a_row(): ...
+def test_instruction_under_other_speech_is_kept_in_audio(): ...  # reason ends "; instruction kept: Other speech at the same time"
+def test_instruction_during_a_film_clip_is_kept_in_audio(): ...
+def test_mixed_layout_word_inside_keeps_the_instruction(): ...
+def test_mixed_layout_word_in_the_window_keeps_the_instruction(): ...
 ```
 
 - [ ] **Steps 2–4:** FAIL → implement → PASS.
@@ -282,7 +291,7 @@ Without transcription (`transcription is None`), Hesitations and Markers say `No
   1. For each voice, in order, progress `"Transcribing <label>…"` (the first miss adds ` (the first run downloads the Whisper model, about 1.6 GB)`): passages = `speech_passages(own[i], episode.duration, passage_gap_s, passage_pad_s)`; `load_words` or else decode that track again, `transcribe_passages`, `keep_own_words(…, own[i], passage_pad_s)` (separate layout only), `save_words`, free the samples.
   2. `other_speech[label]`: separate layout, the other voice's word spans united with its own speech; mixed layout, `[]`.
   3. `find_fillers`, then `find_markers` per voice; marker events join the events.
-  4. Speech cuts = the cut fillers and markers. Every voice's own-speech and loud lists given to `find_silence_cuts` become `subtract(list, speech_cuts)`.
+  4. Speech cuts = the cut fillers and markers. Every voice's own-speech and loud lists given to `find_silence_cuts` become `subtract(list, speech_cuts)`; the reported silence cuts are those cuts minus the speech cuts, so no time is counted twice (the cut map is the same).
   5. `AnalysisResult(..., fillers=…, marker_cuts=…, transcription=TranscriptionInfo(transcriber name or "cache", sum of passage durations, tracks read from the cache))`.
 
 - [ ] **Step 1: failing tests** (fake VAD as in M1, fake `Transcriber` returning fixed words per track, `cache_path` in `tmp_path`):

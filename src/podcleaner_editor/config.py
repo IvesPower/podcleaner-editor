@@ -46,10 +46,22 @@ class Settings:
     filler_pad_s: float = 0.05
     filler_max_s: float = 1.5
     filler_snap_s: float = 0.08
-    # Spoken markers: French on purpose, they are words to recognize.
-    marker_cut_phrase: str = "claude ici on veut couper"
-    marker_clip_phrase: str = "claude ici on veut ajouter un extrait"
-    marker_min_score: float = 85.0
+    # Spoken instructions: French on purpose, they are words to recognize.
+    marker_trigger: str = "claude"
+    marker_cut_words: tuple[str, ...] = (
+        "couper",
+        "coupe",
+        "supprimer",
+        "supprime",
+        "enlever",
+        "enleve",
+        "retirer",
+        "retire",
+    )
+    marker_clip_words: tuple[str, ...] = ("ajouter", "ajoute", "extrait", "inserer", "insere")
+    marker_min_score: float = 80.0
+    marker_pause_s: float = 0.5
+    marker_max_s: float = 15.0
     marker_pad_s: float = 0.1
     # Overlap values tuned on the test recording (samples/pedit): the rule flags widely,
     # Claude (M5) is the one that sets backchannels aside.
@@ -119,13 +131,25 @@ _KEYS: dict[tuple[str, str], tuple[str, str]] = {
         "filler_snap_s",
         "How far a cut edge may move to the quietest point (seconds).",
     ),
-    ("markers", "cut"): ("marker_cut_phrase", "Phrase that asks for a cut."),
-    ("markers", "clip"): ("marker_clip_phrase", "Phrase that asks for a clip to be added."),
+    ("markers", "trigger"): (
+        "marker_trigger",
+        "Word that opens a spoken instruction, at the start of a sentence.",
+    ),
+    ("markers", "cut_words"): ("marker_cut_words", "Words that make an instruction a cut."),
+    ("markers", "clip_words"): (
+        "marker_clip_words",
+        "Words that make an instruction a clip to add.",
+    ),
     ("markers", "min_score"): (
         "marker_min_score",
-        "Lowest similarity (0 to 100) for a heard phrase to count.",
+        "Lowest similarity (0 to 100) for a heard word to count as the trigger.",
     ),
-    ("markers", "pad_s"): ("marker_pad_s", "Margin cut around a marker phrase (seconds)."),
+    ("markers", "pause_s"): (
+        "marker_pause_s",
+        "A pause this long starts or ends an instruction (seconds).",
+    ),
+    ("markers", "max_s"): ("marker_max_s", "Longest instruction (seconds)."),
+    ("markers", "pad_s"): ("marker_pad_s", "Margin cut around an instruction (seconds)."),
     ("overlaps", "min_s"): ("overlap_min_s", "Shortest talk-over flagged (seconds)."),
     ("overlaps", "floor_hold_s"): (
         "overlap_floor_hold_s",

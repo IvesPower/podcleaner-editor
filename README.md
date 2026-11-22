@@ -12,7 +12,7 @@ A command-line tool that does the repetitive part of editing a podcast episode, 
 - **Silences**: shortens to about 0.4 s every silence longer than 1 s where all tracks are quiet, with a fade.
 - **Hesitations**: removes isolated "uh"s that don't break the sentence, and flags the others.
 - **Overlapping speech**: marks with a timecode each time someone tries to talk over the other person without taking the floor.
-- **Voice markers**: finds spoken cues such as "Claude ici on veut couper" ("Claude, cut here") or "Claude ici on veut ajouter un extrait" ("Claude, add a clip here").
+- **Voice markers**: finds spoken instructions to Claude, a sentence that starts with "Claude" (or "dis Claude") and holds an action word, such as "Dis Claude, on va couper ce passage-là" ("Claude, we'll cut this part") or "Claude, ajoute un extrait ici" ("Claude, add a clip here"), and removes the instruction itself from the audio.
 - **Film clips**: locates every clip played during the recording, from activity on the film track.
 - **Cut suggestions**: proposes passages to remove, with the reason (with Claude).
 
