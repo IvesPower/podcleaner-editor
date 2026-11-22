@@ -38,7 +38,17 @@ brew install ffmpeg            # macOS (Windows: winget install ffmpeg)
 uv tool install git+https://github.com/IvesPower/podcleaner-editor
 ```
 
-`podcleaner-editor` and its short alias `pedit` are the same command.
+`podcleaner-editor` and its short alias `pedit` are the same command. In a terminal, it starts with its pixel-art title (`--no-banner` or `PODCLEANER_EDITOR_NO_BANNER=1` to hide it).
+
+## Configure
+
+```bash
+pedit init            # a few questions, then writes your configuration file
+pedit config          # shows the configuration as read, defaults included
+pedit config --path   # only where the file is
+```
+
+`pedit init` asks for the folder of your edited episodes, how you record (one file per voice, or both voices on one stereo file), the first names of the two voices, and whether to use Claude; it checks that Claude Code is installed and logged in. Your current answers are offered as defaults when you run it again. Every other setting is in the file, commented. `pedit init --no-input` writes the commented file without questions.
 
 ## Run
 
@@ -52,9 +62,9 @@ pedit run --voice julien.wav --voice franck.wav --film film.wav --out "Episode 4
 pedit run --voice voices.wav --film film.wav --out "Episode 42" --dry-run
 ```
 
-This writes `Episode 42/Episode 42.edit.md`: the film clips, the attempts to talk over the other person, the long silences that will be shortened, with their timecodes on the original and on the edited audio. `--name` sets the episode name (by default, the `--out` folder name).
+This writes `Episode 42/Episode 42.edit.md`: the film clips, the attempts to talk over the other person, the long silences that will be shortened, with their timecodes on the original and on the edited audio. `--name` sets the episode name (by default, the `--out` folder name). With an output folder set by `pedit init`, `--name "Episode 42"` is enough: the files go to `<output folder>/Episode 42/`.
 
-Coming next: `pedit init` (a few questions, then writes your configuration file), `pedit config`, and the edited audio itself.
+Coming next: transcription, hesitations and voice markers, then the edited audio itself.
 
 ## Claude, optional
 

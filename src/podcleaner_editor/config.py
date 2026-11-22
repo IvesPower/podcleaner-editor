@@ -205,3 +205,39 @@ def render_template(values: dict[str, Any]) -> str:
         else:
             lines.append(f"{key} = {_toml_value(value)}")
     return "\n".join(lines) + "\n"
+
+
+def write_config(path: Path, text: str) -> None:
+    """Writes next to the target first, then renames: an interrupted write leaves no half file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_name(f".{path.name}.part")
+    try:
+        part.write_text(text, encoding="utf-8")
+        os.replace(part, path)
+    finally:
+        part.unlink(missing_ok=True)
+
+
+def write_template(path: Path) -> None:
+    """The commented file with the defaults, for someone who prefers to edit it by hand."""
+    if path.exists():
+        raise EditorError(f"Configuration file already exists: {path}")
+    write_config(path, render_template(settings_values(Settings())))
+
+
+def _shown(value: Any) -> str:
+    if value is None:
+        return "(not set)"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, tuple):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
+def describe(s: Settings) -> list[tuple[str, str]]:
+    """Each setting as (`section.key`, value shown to a person), in the file's order."""
+    return [
+        (f"{section}.{key}", _shown(getattr(s, name)))
+        for (section, key), (name, _) in _KEYS.items()
+    ]

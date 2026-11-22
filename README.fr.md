@@ -38,7 +38,17 @@ brew install ffmpeg            # macOS (Windows : winget install ffmpeg)
 uv tool install git+https://github.com/IvesPower/podcleaner-editor
 ```
 
-`podcleaner-editor` et son alias court `pedit` sont la même commande. Le programme s'affiche en anglais.
+`podcleaner-editor` et son alias court `pedit` sont la même commande. Le programme s'affiche en anglais. Dans un terminal, il commence par son titre en pixel art (`--no-banner` ou `PODCLEANER_EDITOR_NO_BANNER=1` pour le masquer).
+
+## Configurer
+
+```bash
+pedit init            # quelques questions, puis écrit ton fichier de configuration
+pedit config          # affiche la configuration telle qu'elle est lue, défauts compris
+pedit config --path   # seulement l'emplacement du fichier
+```
+
+`pedit init` demande le dossier des épisodes montés, ta façon d'enregistrer (un fichier par voix, ou les deux voix sur un fichier stéréo), les prénoms des deux voix, et s'il faut utiliser Claude ; il vérifie que Claude Code est installé et connecté. Tes réponses actuelles sont proposées par défaut quand tu le relances. Tous les autres réglages sont dans le fichier, commentés. `pedit init --no-input` écrit le fichier commenté sans poser de questions.
 
 ## Lancer
 
@@ -52,9 +62,9 @@ pedit run --voice julien.wav --voice franck.wav --film film.wav --out "Episode 4
 pedit run --voice voix.wav --film film.wav --out "Episode 42" --dry-run
 ```
 
-La commande écrit `Episode 42/Episode 42.edit.md` : les extraits de film, les tentatives de parler par-dessus l'autre, les longs blancs qui seront raccourcis, avec leurs timecodes sur l'audio original et sur l'audio monté. `--name` donne le nom de l'épisode (par défaut, le nom du dossier `--out`).
+La commande écrit `Episode 42/Episode 42.edit.md` : les extraits de film, les tentatives de parler par-dessus l'autre, les longs blancs qui seront raccourcis, avec leurs timecodes sur l'audio original et sur l'audio monté. `--name` donne le nom de l'épisode (par défaut, le nom du dossier `--out`). Avec un dossier de sortie réglé par `pedit init`, `--name "Episode 42"` suffit : les fichiers vont dans `<dossier de sortie>/Episode 42/`.
 
-À venir : `pedit init` (quelques questions, puis écrit ton fichier de configuration), `pedit config`, et l'audio monté lui-même.
+À venir : la transcription, les hésitations et les marqueurs vocaux, puis l'audio monté lui-même.
 
 ## Claude, en option
 

@@ -4,7 +4,7 @@ from typing import Annotated
 
 import typer
 
-from podcleaner_editor import __version__, config, pipeline, prog_name
+from podcleaner_editor import __version__, banner, config, pipeline, prog_name
 from podcleaner_editor.audio_io import require_ffmpeg
 from podcleaner_editor.episode import load_episode
 from podcleaner_editor.errors import EditorError
@@ -31,10 +31,21 @@ def _root(
             "--version", callback=_print_version, is_eager=True, help="Show the version and exit."
         ),
     ] = False,
+    no_banner: Annotated[
+        bool,
+        typer.Option(
+            "--no-banner", help=f"No title at the start (or set {banner.NO_BANNER_ENV_VAR}=1)."
+        ),
+    ] = False,
 ) -> None:
     """Do the repetitive part of editing a podcast episode."""
     if ctx.invoked_subcommand is None:  # the command alone: its help, not an error
+        banner.show(ctx)
         typer.echo(ctx.get_help())
+
+
+def _stdin_is_tty() -> bool:
+    return sys.stdin.isatty()
 
 
 ConfigOption = Annotated[
@@ -57,8 +68,48 @@ def _output_dir(out: Path | None, name: str | None, settings: config.Settings) -
     return settings.output_dir / name, name
 
 
+@app.command("init")
+def init_command(
+    ctx: typer.Context,
+    config_path: ConfigOption = None,
+    no_input: Annotated[
+        bool,
+        typer.Option("--no-input", help="Ask nothing: write the commented file to fill in."),
+    ] = False,
+) -> None:
+    """Create your configuration file by answering a few questions."""
+    banner.show(ctx)
+    path = config.resolve_config_path(config_path)
+    if not no_input and _stdin_is_tty():
+        from podcleaner_editor.wizard import run_wizard
+
+        run_wizard(path)
+        return
+    config.write_template(path)
+    typer.echo(f"Configuration file created: {path}")
+    typer.echo("Open it to set output_dir, the recording layout and the speakers' names.")
+
+
+@app.command("config")
+def config_command(
+    config_path: ConfigOption = None,
+    path_only: Annotated[
+        bool, typer.Option("--path", help="Only print where the configuration file is.")
+    ] = False,
+) -> None:
+    """Show the configuration as read, defaults included."""
+    path = config.resolve_config_path(config_path)
+    if path_only:
+        typer.echo(path)
+        return
+    typer.echo(f"File: {path}" + ("" if path.is_file() else " (not created yet: defaults)"))
+    for key, value in config.describe(config.load_settings(path)):
+        typer.echo(f"{key} = {value}")
+
+
 @app.command("run")
 def run_command(
+    ctx: typer.Context,
     voices: Annotated[
         list[Path],
         typer.Option(
@@ -80,6 +131,7 @@ def run_command(
     ] = False,
 ) -> None:
     """Analyse an episode and write its edit file."""
+    banner.show(ctx)
     settings = config.load_settings(config.resolve_config_path(config_path))
     out_dir, episode_name = _output_dir(out, name, settings)
     if not dry_run:
