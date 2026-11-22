@@ -8,7 +8,7 @@ CLI Python qui fait le travail répétitif du montage d'un épisode de podcast :
 
 ## Commandes
 
-La CLI fait `version` et `run --dry-run` ; `init` et `config` arrivent avec la tâche 11 du plan M1.
+La CLI fait `init`, `config`, `run --dry-run` et `version` (fin du jalon M1) ; l'audio monté arrive avec M3.
 
 ```bash
 # Essai sur l'enregistrement de test (samples/pedit, lien local hors git)
