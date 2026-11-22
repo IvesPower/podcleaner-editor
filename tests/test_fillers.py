@@ -49,6 +49,12 @@ def test_euh_overlapping_a_word_on_the_same_track_is_flagged():
     assert f.cut is None and f.reason == "Other speech at the same time"
 
 
+def test_euh_overlapping_an_earlier_word_on_the_same_track_is_flagged():
+    words = [Word("long", 3.0, 5.2), Word("alors", 4.0, 4.6), Word("euh", 5.0, 5.4)]
+    [f] = _find(words)
+    assert f.cut is None and f.reason == "Other speech at the same time"
+
+
 def test_euh_during_film_clip_is_flagged():
     [f] = _find(film=[I(5.1, 5.2)])
     assert f.cut is None and f.reason == "During a film clip"

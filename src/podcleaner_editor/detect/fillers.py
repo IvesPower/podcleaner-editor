@@ -65,8 +65,9 @@ def find_fillers(
             cut: Interval | None = None
             if word.span.duration > settings.filler_max_s:
                 reason = TOO_LONG
-            elif (prev is not None and prev.end > word.start) or (
-                nxt is not None and nxt.start < word.end
+            elif any(
+                j != i and other.start < word.end and other.end > word.start
+                for j, other in enumerate(track_words)
             ):
                 reason = OTHER_SPEECH
             else:

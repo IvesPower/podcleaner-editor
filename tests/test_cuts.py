@@ -24,18 +24,32 @@ def test_snap_moves_edges_to_quiet_frames():
     assert abs(snapped.end - 5.49) < 1e-6
 
 
-def test_snap_never_enters_the_word():
+def test_snap_start_never_enters_the_word():
     levels = np.full(1000, -40.0)
-    levels[510] = -100.0  # inside the word
-    snapped = snap_to_quiet(I(5.0, 5.5), I(5.05, 5.4), levels, HOP, 0.08, I(0.0, 10.0))
-    assert snapped.start <= 5.05 and snapped.end >= 5.4
+    levels[505] = -100.0  # inside the word, within reach of the unclamped search
+    snapped = snap_to_quiet(I(5.0, 5.5), I(5.02, 5.4), levels, HOP, 0.08, I(0.0, 10.0))
+    assert snapped.start <= 5.02
 
 
-def test_snap_stays_inside_bounds():
+def test_snap_end_never_enters_the_word():
     levels = np.full(1000, -40.0)
-    levels[480] = -100.0
+    levels[537] = -100.0  # the end edge at 5.38 would cut into the word
+    snapped = snap_to_quiet(I(5.0, 5.45), I(5.02, 5.4), levels, HOP, 0.08, I(0.0, 10.0))
+    assert snapped.end >= 5.4
+
+
+def test_snap_start_stays_inside_bounds():
+    levels = np.full(1000, -40.0)
+    levels[495] = -100.0  # before the previous word's end, within reach of the unclamped search
     snapped = snap_to_quiet(I(4.98, 5.5), I(5.0, 5.4), levels, HOP, 0.08, I(4.98, 10.0))
-    assert snapped.start >= 4.98
+    assert snapped.start == 4.98
+
+
+def test_snap_end_stays_inside_bounds():
+    levels = np.full(1000, -40.0)
+    levels[545] = -100.0  # the end edge at 5.46 would pass the next word's start
+    snapped = snap_to_quiet(I(4.9, 5.4), I(5.0, 5.3), levels, HOP, 0.08, I(0.0, 5.42))
+    assert snapped.end <= 5.42
 
 
 def test_snap_keeps_edge_without_levels():
