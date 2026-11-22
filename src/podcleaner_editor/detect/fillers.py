@@ -7,7 +7,7 @@ import numpy as np
 
 from podcleaner_editor.analysis.words import Word, normalize
 from podcleaner_editor.config import Settings
-from podcleaner_editor.detect.cuts import OTHER_SPEECH, blocking_reason, cut_window, snap_to_quiet
+from podcleaner_editor.detect.cuts import OTHER_SPEECH, blocking_reason, word_cut_window
 from podcleaner_editor.timeline import Interval
 
 CUT_REASON = "Isolated hesitation"
@@ -71,18 +71,14 @@ def find_fillers(
             ):
                 reason = OTHER_SPEECH
             else:
-                bounds = Interval(
-                    prev.end if prev else 0.0,
-                    nxt.start if nxt else len(levels[track]) * hop,
-                )
-                window = cut_window(
+                window = word_cut_window(
                     word.span,
                     prev.end if prev else None,
                     nxt.start if nxt else None,
                     settings.filler_pad_s,
-                )
-                window = snap_to_quiet(
-                    window, word.span, levels[track], hop, settings.filler_snap_s, bounds
+                    levels[track],
+                    hop,
+                    settings.filler_snap_s,
                 )
                 blocked = blocking_reason(window, other_speech.get(track, []), film)
                 if blocked is None:

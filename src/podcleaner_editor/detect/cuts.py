@@ -80,3 +80,21 @@ def blocking_reason(
     if intersect([window], film):
         return FILM_CLIP
     return None
+
+
+def word_cut_window(
+    span: Interval,
+    prev_end: float | None,
+    next_start: float | None,
+    pad: float,
+    levels: np.ndarray,
+    hop_s: float,
+    snap_s: float,
+) -> Interval:
+    """`cut_window` snapped to the quietest frames, within the gap around the neighbouring words."""
+    bounds = Interval(
+        prev_end if prev_end is not None else 0.0,
+        next_start if next_start is not None else len(levels) * hop_s,
+    )
+    window = cut_window(span, prev_end, next_start, pad)
+    return snap_to_quiet(window, span, levels, hop_s, snap_s, bounds)
