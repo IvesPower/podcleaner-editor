@@ -4,7 +4,7 @@
 
 Un outil en ligne de commande qui fait le travail répétitif du montage d'un épisode de podcast, du fichier brut aux pistes prêtes à finaliser à la main dans Logic Pro. Il remplace Auphonic pour le son et prépare le travail manuel restant avec des timecodes.
 
-> **État : début du développement.** Rien n'est encore utilisable. Le premier jalon (analyse et rapport `--dry-run`) est en cours ; voir la [feuille de route](docs/superpowers/plans/2026-11-05-roadmap.fr.md).
+> **État : début du développement.** L'analyse fonctionne en mode `--dry-run` (jalons 1 et 2 : blancs, chevauchements, extraits de film, transcription, hésitations, marqueurs vocaux) ; aucun audio n'est encore écrit. Voir la [feuille de route](docs/superpowers/plans/2026-11-05-roadmap.fr.md).
 
 ## Ce qu'il fera
 
@@ -62,9 +62,11 @@ pedit run --voice julien.wav --voice franck.wav --film film.wav --out "Episode 4
 pedit run --voice voix.wav --film film.wav --out "Episode 42" --dry-run
 ```
 
-La commande écrit `Episode 42/Episode 42.edit.md` : les extraits de film, les tentatives de parler par-dessus l'autre, les longs blancs qui seront raccourcis, avec leurs timecodes sur l'audio original et sur l'audio monté. `--name` donne le nom de l'épisode (par défaut, le nom du dossier `--out`). Avec un dossier de sortie réglé par `pedit init`, `--name "Episode 42"` suffit : les fichiers vont dans `<dossier de sortie>/Episode 42/`.
+La commande écrit `Episode 42/Episode 42.edit.md` : les marqueurs vocaux, les extraits de film et les tentatives de parler par-dessus l'autre, avec leurs timecodes sur l'audio original et sur l'audio monté ; puis un rapport : les longs blancs et les « euh » qui seront retirés, les « euh » seulement signalés (avec leurs timecodes et les mots autour), et ce qui a été transcrit. `--name` donne le nom de l'épisode (par défaut, le nom du dossier `--out`). Avec un dossier de sortie réglé par `pedit init`, `--name "Episode 42"` suffit : les fichiers vont dans `<dossier de sortie>/Episode 42/`.
 
-À venir : la transcription, les hésitations et les marqueurs vocaux, puis l'audio monté lui-même.
+Seuls les passages où quelqu'un parle sont transcrits, avec Whisper (mlx-whisper sur Apple silicon, faster-whisper ailleurs). Le premier lancement télécharge le modèle Whisper, environ 1,6 Go, une seule fois. Les mots entendus sont gardés dans `Episode 42/Episode 42.words.json` : relancer sur les mêmes fichiers ne retranscrit pas.
+
+À venir : l'audio monté lui-même.
 
 ## Claude, en option
 
@@ -84,6 +86,7 @@ Tout le traitement du signal tourne en local avec des outils open source (ffmpeg
 | Cahier des charges | [docs/spec.md](docs/spec.md) | [docs/spec.fr.md](docs/spec.fr.md) (fait foi) |
 | Feuille de route | [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md) | [feuille de route](docs/superpowers/plans/2026-11-05-roadmap.fr.md) |
 | Plan du jalon 1 | [M1 plan](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.md) | [plan M1](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.fr.md) |
+| Plan du jalon 2 | [M2 plan](docs/superpowers/plans/2026-11-22-m2-transcription-markers.md) | [plan M2](docs/superpowers/plans/2026-11-22-m2-transcription-markers.fr.md) |
 | Journal des versions | [CHANGELOG.md](CHANGELOG.md) | [CHANGELOG.fr.md](CHANGELOG.fr.md) |
 
 ## Contribuer

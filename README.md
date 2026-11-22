@@ -4,7 +4,7 @@
 
 A command-line tool that does the repetitive part of editing a podcast episode, from the raw recording to tracks that are ready to finish by hand in Logic Pro. It replaces Auphonic for the sound and prepares the remaining manual work with timecodes.
 
-> **Status: early development.** Nothing is usable yet. The first milestone (analysis and `--dry-run` report) is in progress; see the [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md).
+> **Status: early development.** The analysis works in `--dry-run` mode (milestones 1 and 2: silences, overlaps, film clips, transcription, hesitations, voice markers); no audio is written yet. See the [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md).
 
 ## What it will do
 
@@ -62,9 +62,11 @@ pedit run --voice julien.wav --voice franck.wav --film film.wav --out "Episode 4
 pedit run --voice voices.wav --film film.wav --out "Episode 42" --dry-run
 ```
 
-This writes `Episode 42/Episode 42.edit.md`: the film clips, the attempts to talk over the other person, the long silences that will be shortened, with their timecodes on the original and on the edited audio. `--name` sets the episode name (by default, the `--out` folder name). With an output folder set by `pedit init`, `--name "Episode 42"` is enough: the files go to `<output folder>/Episode 42/`.
+This writes `Episode 42/Episode 42.edit.md`: the voice markers, the film clips and the attempts to talk over the other person, with their timecodes on the original and on the edited audio; then a report: the long silences and the "uh"s that will be removed, the "uh"s only flagged (with their timecodes and the words around them), and what was transcribed. `--name` sets the episode name (by default, the `--out` folder name). With an output folder set by `pedit init`, `--name "Episode 42"` is enough: the files go to `<output folder>/Episode 42/`.
 
-Coming next: transcription, hesitations and voice markers, then the edited audio itself.
+Only the passages where someone speaks are transcribed, with Whisper (mlx-whisper on Apple silicon, faster-whisper elsewhere). The first run downloads the Whisper model, about 1.6 GB, once. The words heard are kept in `Episode 42/Episode 42.words.json`, so running again on the same files does not transcribe again.
+
+Coming next: the edited audio itself.
 
 ## Claude, optional
 
@@ -84,6 +86,7 @@ All signal processing runs locally with open source tools (ffmpeg, DeepFilterNet
 | Specification | [docs/spec.md](docs/spec.md) | [docs/spec.fr.md](docs/spec.fr.md) (reference) |
 | Roadmap | [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md) | [feuille de route](docs/superpowers/plans/2026-11-05-roadmap.fr.md) |
 | Milestone 1 plan | [M1 plan](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.md) | [plan M1](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.fr.md) |
+| Milestone 2 plan | [M2 plan](docs/superpowers/plans/2026-11-22-m2-transcription-markers.md) | [plan M2](docs/superpowers/plans/2026-11-22-m2-transcription-markers.fr.md) |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) | [CHANGELOG.fr.md](CHANGELOG.fr.md) |
 
 ## Contributing
