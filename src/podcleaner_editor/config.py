@@ -32,12 +32,15 @@ class Settings:
     level_hop_s: float = 0.01
     bleed_margin_db: float = 10.0
     activity_above_floor_db: float = 12.0
+    own_speech_gap_s: float = 0.2
     film_threshold_dbfs: float = -45.0
     film_merge_gap_s: float = 2.0
     film_min_clip_s: float = 3.0
-    overlap_min_s: float = 0.4
-    overlap_floor_hold_s: float = 1.0
-    overlap_merge_gap_s: float = 0.3
+    # Overlap values tuned on the test recording (samples/pedit): the rule flags widely,
+    # Claude (M5) is the one that sets backchannels aside.
+    overlap_min_s: float = 0.15
+    overlap_floor_hold_s: float = 0.5
+    overlap_merge_gap_s: float = 0.5
     max_duration_mismatch_s: float = 2.0
     claude_enabled: bool = True
     claude_model: str = "claude-sonnet-5-5"
@@ -66,6 +69,10 @@ _KEYS: dict[tuple[str, str], tuple[str, str]] = {
     ("levels", "above_floor_db"): (
         "activity_above_floor_db",
         "Sound this far above a track's noise floor (dB) is never a silence.",
+    ),
+    ("levels", "own_speech_gap_s"): (
+        "own_speech_gap_s",
+        "Dips shorter than this inside one voice's speech are closed (seconds).",
     ),
     ("film", "threshold_dbfs"): ("film_threshold_dbfs", "Film track level that counts as playing."),
     ("film", "merge_gap_s"): ("film_merge_gap_s", "Pauses shorter than this stay in one clip."),

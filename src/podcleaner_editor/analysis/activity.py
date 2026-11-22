@@ -6,7 +6,7 @@ Works on frame levels (dBFS, one value every `hop_s` seconds, from `audio_io.fra
 import numpy as np
 
 from podcleaner_editor.audio_io import LEVEL_FLOOR_DB
-from podcleaner_editor.timeline import Interval
+from podcleaner_editor.timeline import Interval, merge
 
 # Frames at or below this are digital silence (a gated or edited track), not room noise.
 _DIGITAL_SILENCE_DB = LEVEL_FLOOR_DB + 20
@@ -36,16 +36,19 @@ def own_speech(
     other_levels: np.ndarray,
     hop_s: float,
     bleed_margin_db: float,
+    max_gap: float = 0.0,
 ) -> list[Interval]:
     """The speech in `vad` that is this mic's own voice, not the other voice's bleed.
 
     A frame is kept when this mic is louder than the other mic minus `bleed_margin_db`:
-    bleed reaches a mic much quieter than the voice reaches its own mic.
+    bleed reaches a mic much quieter than the voice reaches its own mic. The test runs
+    frame by frame, so it drops the dips between syllables; gaps up to `max_gap` are
+    closed again.
     """
     frames = min(len(levels), len(other_levels))
     speech = intervals_to_mask(vad, frames, hop_s)
     louder = levels[:frames] > other_levels[:frames] - bleed_margin_db
-    return mask_to_intervals(speech & louder, hop_s)
+    return merge(mask_to_intervals(speech & louder, hop_s), max_gap)
 
 
 def noise_floor_db(levels: np.ndarray) -> float:

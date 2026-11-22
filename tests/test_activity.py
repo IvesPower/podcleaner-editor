@@ -44,6 +44,15 @@ def test_own_speech_stays_inside_the_vad_intervals():
     assert _pairs(own_speech([I(1, 2), I(6, 7.5)], lv_a, lv_b, HOP, 10.0)) == [(1, 2), (6, 7.5)]
 
 
+def test_own_speech_closes_short_gaps_between_syllables():
+    # B talks over A 2–3 s, dipping between syllables (2.4–2.45 s, 2.7–2.72 s).
+    lv_a = _levels(5, -20)
+    lv_b = _levels(5, -60, (2, 2.4, -20), (2.45, 2.7, -20), (2.72, 3, -20))
+    pieces = own_speech([I(2, 3)], lv_b, lv_a, HOP, 10.0)
+    assert len(pieces) == 3
+    assert _pairs(own_speech([I(2, 3)], lv_b, lv_a, HOP, 10.0, max_gap=0.3)) == [(2, 3)]
+
+
 def test_noise_floor_and_loud_intervals():
     # Noise at -60 dBFS, a laugh at -30 dBFS from 4 to 5.5 s.
     levels = _levels(20, -60, (4, 5.5, -30))

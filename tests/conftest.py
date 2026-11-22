@@ -32,3 +32,11 @@ def write_audio(
 @pytest.fixture
 def make_wav() -> Callable[..., Path]:
     return write_audio
+
+
+@pytest.fixture(autouse=True)
+def _isolated_config(tmp_path_factory, monkeypatch):
+    """Tests never read the configuration file of the person running them."""
+    path = tmp_path_factory.mktemp("config") / "config.toml"
+    monkeypatch.setenv("PODCLEANER_EDITOR_CONFIG", str(path))
+    return path
