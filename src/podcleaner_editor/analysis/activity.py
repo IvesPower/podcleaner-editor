@@ -17,7 +17,7 @@ def mask_to_intervals(mask: np.ndarray, hop_s: float) -> list[Interval]:
     padded = np.concatenate(([False], mask.astype(bool), [False]))
     edges = np.flatnonzero(np.diff(padded.astype(np.int8)))
     starts, ends = edges[::2], edges[1::2]  # always paired: the padding closes every run
-    return [Interval(s * hop_s, e * hop_s) for s, e in zip(starts, ends, strict=True)]
+    return [Interval(float(s * hop_s), float(e * hop_s)) for s, e in zip(starts, ends, strict=True)]
 
 
 def intervals_to_mask(intervals: list[Interval], frames: int, hop_s: float) -> np.ndarray:

@@ -62,5 +62,10 @@ def test_noise_floor_of_a_silent_track():
     assert noise_floor_db(_levels(5, -120.0)) == -120.0
 
 
+def test_intervals_hold_plain_floats():
+    (interval,) = loud_intervals(_levels(5, -60, (1, 2, -20)), HOP, -48)
+    assert type(interval.start) is float and type(interval.end) is float
+
+
 def test_loud_intervals_of_nothing():
     assert loud_intervals(_levels(5, -60), HOP, -48) == []
