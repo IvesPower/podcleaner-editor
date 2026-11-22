@@ -33,7 +33,7 @@ from podcleaner_editor.timeline import Interval, subtract, union
 Decoder = Callable[[Path], np.ndarray]
 Vad = Callable[[np.ndarray, Settings], list[Interval]]
 
-_DOWNLOAD_NOTE = " (the first run downloads the Whisper model, about 1.6 GB)"
+_DOWNLOAD_NOTE = " (the Whisper model is downloaded on first use, about 1.6 GB)"
 
 
 def _loud(levels: np.ndarray, settings: Settings) -> list[Interval]:
@@ -80,7 +80,7 @@ def _transcribe(
         del samples  # free this voice before decoding the next one
         if episode.layout == "separate":
             heard = keep_own_words(heard, own_track, pad)
-        if cache_path and key:
+        if cache_path:
             save_words(cache_path, track.label, key, heard)
         words[track.label] = heard
     backend = transcriber.name if transcribed and transcriber else "cache"
@@ -176,11 +176,13 @@ def analyze(
     loud = [_loud(levels, settings) for levels in voice_levels]
     activities = [subtract(x, speech_cuts) for x in [*own, *loud]]
     cuts = find_silence_cuts([*activities, film_on], episode.duration, settings)
+    # A silence the speech cuts already remove is reported with them, not as a silence.
+    silence_cuts = [c for c in subtract(cuts, speech_cuts) if c.duration > 0]
 
     return AnalysisResult(
         episode=episode,
         events=sorted(events, key=lambda e: (e.start, e.end)),
-        silence_cuts=CutMap(tuple(cuts)),
+        silence_cuts=CutMap(tuple(silence_cuts)),
         dry_run=True,
         fillers=tuple(fillers),
         marker_cuts=tuple(sorted(marker_cuts)),

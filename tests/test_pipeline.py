@@ -54,7 +54,10 @@ def _no_whisper(request, monkeypatch):
 
 
 class _FakeTranscriber:
-    """Fixed words per voice file; `decode` remembers which file is being transcribed."""
+    """Fixed words per voice file; `decode` remembers which file is being transcribed.
+
+    It relies on the pipeline decoding a voice again just before transcribing it.
+    """
 
     name = "fake whisper"
 
@@ -210,6 +213,23 @@ def test_euh_between_pauses_leaves_one_short_pause(quiet_film_files):
     assert kept == pytest.approx(SETTINGS.silence_target_s)
 
 
+def test_euh_that_swallows_a_gap_is_not_a_silence(quiet_film_files):
+    a, b, film = quiet_film_files
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    julien = _words(("bonjour", 9.5, 10.0), ("euh", 10.1, 11.3), ("voilà", 11.4, 12.0))
+    fake = _FakeTranscriber({"julien": julien})
+    vad = _fake_vad({90: [I(5, 10), I(10.1, 11.3), I(11.4, 20)], 91: [I(50, 55)]})
+    result = _analyze(episode, fake, vad)
+    [filler] = result.fillers
+    assert filler.cut is not None
+    # Once the "euh" is cut, 10.0-11.4 is a 1.4 s gap: its silence cut lies inside the
+    # "euh" cut, so it is counted with the hesitations only.
+    assert not [c for c in result.silence_cuts.cuts if c.start < 11.4 and c.end > 10.0]
+    assert filler.cut in result.cuts.cuts
+    removed = result.silence_cuts.removed() + filler.cut.duration
+    assert result.cuts.removed() == pytest.approx(removed)
+
+
 def test_second_run_reads_the_cache(quiet_film_files, tmp_path):
     a, b, film = quiet_film_files
     episode = load_episode([a, b], film, "ep", SETTINGS)
@@ -220,9 +240,9 @@ def test_second_run_reads_the_cache(quiet_film_files, tmp_path):
     steps: list[str] = []
     first = _analyze(episode, fake, vad, cache_path=cache, progress=steps.append)
     assert cache.is_file()
-    download = [s for s in steps if "downloads the Whisper model" in s]
+    download = [s for s in steps if "Whisper model is downloaded" in s]
     assert download == [
-        "Transcribing Julien… (the first run downloads the Whisper model, about 1.6 GB)"
+        "Transcribing Julien… (the Whisper model is downloaded on first use, about 1.6 GB)"
     ]
     assert "Transcribing Franck…" in steps
     assert first.transcription.cached_tracks == 0
@@ -237,7 +257,7 @@ def test_second_run_reads_the_cache(quiet_film_files, tmp_path):
     assert second.transcription.cached_tracks == 2
     assert second.transcription.backend == "cache"
     assert second.transcription.speech_s == first.transcription.speech_s
-    assert not any("downloads" in s for s in steps)
+    assert not any("downloaded" in s for s in steps)
 
 
 def test_transcriber_created_only_on_a_cache_miss(quiet_film_files, tmp_path, monkeypatch):
@@ -352,57 +372,98 @@ def test_cli_needs_a_name_without_out(episode_files):
     assert "--name" in str(result.exception)
 
 
+JULIEN_WAV = SAMPLES / "pedit-full-piste-1-julien.wav"
+FRANCK_WAV = SAMPLES / "pedit-full-piste-2-franck.wav"
+FILM_WAV = SAMPLES / "pedit-full-piste-3-film.wav"
+# Julien's three spoken instructions and his three "euh"s, checked by ear (22 Nov 2026).
+EXPECTED_MARKERS = [("Clip to add", 18.7), ("Requested cut", 27.6), ("Requested cut", 40.3)]
+JULIEN_EUH = [13.2, 26.9, 39.7]
+FRANCK_EUH = [48.0, 50.9, 51.3]  # over Julien: flagged, not cut
+
+
+def _seconds(tc: str) -> float:
+    hours, minutes, secs = tc.split(":")
+    return int(hours) * 3600 + int(minutes) * 60 + float(secs)
+
+
+def _table_rows(text: str, section: str) -> list[list[str]]:
+    """The data rows (header and rule left out) of the first table under `section`."""
+    body = text.split(section, 1)[1].split("\n### ", 1)[0]
+    rows = [line for line in body.splitlines() if line.startswith("| ")]
+    return [[c.strip() for c in row.strip("|").split(" | ")] for row in rows[2:]]
+
+
+def _near(found: list[float], expected: list[float]) -> bool:
+    return len(found) == len(expected) and all(
+        abs(f - e) <= 0.3 for f, e in zip(found, expected, strict=True)
+    )
+
+
+def _run_and_check(tmp_path, voices, name: str) -> str:
+    result = _cli(
+        *[a for v in voices for a in ("--voice", v)],
+        "--film",
+        FILM_WAV,
+        "--out",
+        tmp_path / name,
+        "--dry-run",
+    )
+    assert result.exit_code == 0, result.output
+    text = (tmp_path / name / f"{name}.edit.md").read_text(encoding="utf-8")
+    rows = _table_rows(text, "## Timecodes")
+    markers = [(r[1], _seconds(r[3])) for r in rows if r[1] in ("Clip to add", "Requested cut")]
+    assert [t for t, _ in markers] == [t for t, _ in EXPECTED_MARKERS]
+    assert _near([s for _, s in markers], [s for _, s in EXPECTED_MARKERS])
+    assert "3 spoken markers: 2 requested cuts, 1 clip to add; 3 phrases removed" in text
+    clips = [r for r in rows if r[1] == "Film clip"]
+    assert len(clips) == 1 and _near([_seconds(clips[0][3])], [62.27])
+    assert _near([_seconds(clips[0][5])], [5.16])
+    # M1's five silences, less the parts the instructions and "euh"s now remove; a 10 ms
+    # piece is left between the "euh" at 39.7 s and the instruction after it.
+    assert "6 silences shortened, 00:00:06.9" in text
+    assert "mlx-whisper" in text or "faster-whisper" in text
+
+    # The cut "euh"s are not listed in the edit file: read them back from the words cache.
+    episode = load_episode(voices, FILM_WAV, name, Settings())
+    cache = tmp_path / name / f"{name}.words.json"
+    analysed = pipeline.analyze(episode, Settings(), cache_path=cache)
+    assert analysed.transcription.backend == "cache"
+    cut = [f.word.start for f in analysed.fillers if f.cut is not None]
+    assert _near(cut, JULIEN_EUH)
+    return text
+
+
 @pytest.mark.slow
 @pytest.mark.skipif(not SAMPLES.is_dir(), reason="samples/pedit/ is not available")
 def test_dry_run_on_the_test_recording(tmp_path):
-    voices = ["pedit-full-piste-1-julien.wav", "pedit-full-piste-2-franck.wav"]
-    args = [a for v in voices for a in ("--voice", SAMPLES / v)]
-    film = SAMPLES / "pedit-full-piste-3-film.wav"
-    result = _cli(*args, "--film", film, "--out", tmp_path / "pedit", "--dry-run")
-    assert result.exit_code == 0, result.output
-    text = (tmp_path / "pedit" / "pedit.edit.md").read_text(encoding="utf-8")
-    assert "| Film clip |" in text
+    text = _run_and_check(tmp_path, [JULIEN_WAV, FRANCK_WAV], "pedit")
+    rows = _table_rows(text, "## Timecodes")
     # The three talk-overs Julien recorded (Franck over Julien), and no other.
-    assert text.count("| Overlap |") == 3
-    for start in ("00:00:47.", "00:00:50.1", "00:00:50.8"):
-        assert f"| Overlap | Voice B | {start}" in text
-    _check_common(text)
-
-
-def _check_common(text: str) -> None:
-    """What both layouts find on the test recording."""
-    assert text.count("| Film clip |") == 1
-    assert "| Film clip | Film | 00:01:02.2" in text and "| 00:00:05.1" in text
-    # M1's five silences (6.8 s), plus the gap the long "euh" at 13.2 s leaves once cut;
-    # the "euh" at 26.9 s also lengthens the silence before it.
-    assert "6 silences shortened, 00:00:07.8" in text
-    assert "hesitations removed" in text
-    assert "mlx-whisper" in text or "faster-whisper" in text
+    overlaps = [_seconds(r[3]) for r in rows if r[1] == "Overlap"]
+    assert _near(overlaps, [47.74, 50.17, 50.8])
+    assert all(r[2] == "Voice B" for r in rows if r[1] == "Overlap")
+    assert "3 hesitations removed" in text and "3 flagged:" in text
+    flagged = _table_rows(text, "### Hesitations")
+    assert _near([_seconds(r[0]) for r in flagged], FRANCK_EUH)
+    assert all(r[2] == "Voice B" and r[4] == OTHER_SPEECH for r in flagged)
 
 
 @pytest.mark.slow
 @pytest.mark.skipif(not SAMPLES.is_dir(), reason="samples/pedit/ is not available")
 def test_dry_run_on_the_mixed_test_recording(tmp_path):
-    film = SAMPLES / "pedit-full-piste-3-film.wav"
-    voices = SAMPLES / "pedit-full.wav"
-    result = _cli("--voice", voices, "--film", film, "--out", tmp_path / "mix", "--dry-run")
-    assert result.exit_code == 0, result.output
-    text = (tmp_path / "mix" / "mix.edit.md").read_text(encoding="utf-8")
+    text = _run_and_check(tmp_path, [SAMPLES / "pedit-full.wav"], "mix")
     assert "Not available: both voices are on one track." in text
-    _check_common(text)
+    # Whisper follows the louder voice: Franck's "euh"s over Julien are not heard.
+    assert "3 hesitations removed" in text and "0 flagged." in text
 
 
 @pytest.mark.slow
 @pytest.mark.skipif(not SAMPLES.is_dir(), reason="samples/pedit/ is not available")
 def test_dry_run_on_an_amix_of_the_test_recording(tmp_path):
-    voices = [SAMPLES / "pedit-full-piste-1-julien.wav", SAMPLES / "pedit-full-piste-2-franck.wav"]
     mixed = tmp_path / "amix.wav"
-    inputs = [a for v in voices for a in ("-i", str(v))]
+    inputs = [a for v in (JULIEN_WAV, FRANCK_WAV) for a in ("-i", str(v))]
     command = ["ffmpeg", "-nostdin", "-v", "error", *inputs, "-filter_complex"]
     subprocess.run([*command, "amix=inputs=2:normalize=0", str(mixed)], check=True)
-    film = SAMPLES / "pedit-full-piste-3-film.wav"
-    result = _cli("--voice", mixed, "--film", film, "--out", tmp_path / "amix", "--dry-run")
-    assert result.exit_code == 0, result.output
-    text = (tmp_path / "amix" / "amix.edit.md").read_text(encoding="utf-8")
+    text = _run_and_check(tmp_path, [mixed], "amix")
     assert "Not available: both voices are on one track." in text
-    _check_common(text)
+    assert "3 hesitations removed" in text and "0 flagged." in text
