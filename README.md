@@ -31,18 +31,30 @@ A command-line tool that does the repetitive part of editing a podcast episode, 
 - One Markdown edit file per episode: timecodes (on the original and on the final audio) and a report (loudness before and after, what was removed, what was flagged).
 - Markers as a MIDI file and inside the mix WAV, for Logic Pro and Cakewalk.
 
-## Commands
-
-Planned interface, available from milestone 1:
+## Install
 
 ```bash
+brew install ffmpeg            # macOS (Windows: winget install ffmpeg)
 uv tool install git+https://github.com/IvesPower/podcleaner-editor
-pedit init       # a few questions, then writes your configuration file
-pedit run --voice julien.wav --voice marc.wav --film film.wav --out episode-42 --dry-run
-pedit config     # shows the configuration (--path: only where it is)
 ```
 
-`podcleaner-editor` and its short alias `pedit` are the same command. In a terminal, it starts with its pixel-art title.
+`podcleaner-editor` and its short alias `pedit` are the same command.
+
+## Run
+
+The analysis works today, in dry-run mode: it writes the edit file, not the audio yet.
+
+```bash
+# One file per voice
+pedit run --voice julien.wav --voice franck.wav --film film.wav --out "Episode 42" --dry-run
+
+# Both voices on one stereo file
+pedit run --voice voices.wav --film film.wav --out "Episode 42" --dry-run
+```
+
+This writes `Episode 42/Episode 42.edit.md`: the film clips, the attempts to talk over the other person, the long silences that will be shortened, with their timecodes on the original and on the edited audio. `--name` sets the episode name (by default, the `--out` folder name).
+
+Coming next: `pedit init` (a few questions, then writes your configuration file), `pedit config`, and the edited audio itself.
 
 ## Claude, optional
 

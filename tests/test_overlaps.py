@@ -24,8 +24,14 @@ def test_attempt_flagged():
     assert events[0].source == "rule"
 
 
-def test_short_backchannel_ignored():
-    assert _find([I(0, 20)], [I(5, 5.3)]) == []
+def test_a_blip_is_ignored():
+    assert _find([I(0, 20)], [I(5, 5.1)]) == []
+
+
+def test_a_short_talk_over_is_flagged():
+    # As on the test recording: 0.17 s over the other voice. Claude (M5) sets
+    # backchannels aside; the rule flags widely.
+    assert len(_find([I(0, 20)], [I(5, 5.17)])) == 1
 
 
 def test_turn_taking_not_flagged():

@@ -8,7 +8,14 @@ CLI Python qui fait le travail répétitif du montage d'un épisode de podcast :
 
 ## Commandes
 
-La CLI ne fait encore que `version` ; le reste arrive avec les tâches suivantes du plan M1.
+La CLI fait `version` et `run --dry-run` ; `init` et `config` arrivent avec la tâche 11 du plan M1.
+
+```bash
+# Essai sur l'enregistrement de test (samples/pedit, lien local hors git)
+uv run pedit run --voice samples/pedit/pedit-full-piste-1-julien.wav \
+  --voice samples/pedit/pedit-full-piste-2-franck.wav \
+  --film samples/pedit/pedit-full-piste-3-film.wav --out out/pedit --dry-run
+```
 
 ```bash
 uv sync                    # installer
@@ -58,6 +65,20 @@ Le hook `.claude/hooks/python_checks.py` lance Ruff et les tests rapides après 
 | Assistant `init` | Pose les questions (dossier de sortie, forme d'enregistrement, prénoms des voix, Claude) et écrit le modèle commenté avec les réponses ; valeurs actuelles proposées par défaut, remplacement après confirmation, écriture atomique ; hors terminal ou `--no-input` : modèle commenté sans questions |
 | Configuration | TOML dans `platformdirs.user_config_dir("podcleaner-editor")/config.toml`, remplaçable par `--config` ou `PODCLEANER_EDITOR_CONFIG` |
 | Erreurs | `EditorError` : message `Error: …` sur stderr, code de sortie 2, jamais de trace Python |
+
+## Réglages validés sur l'enregistrement de test
+
+`samples/pedit` (75 s, Julien et Franck, gate au silence numérique entre les phrases), relu avec Julien le 22 nov. 2026 :
+
+| Réglage | Valeur | Pourquoi |
+| --- | --- | --- |
+| `[overlaps] min_s` | 0,15 s | Les trois tentatives de Franck durent 0,17 à 0,6 s ; la règle signale large, Claude (M5) écartera les relances |
+| `[overlaps] floor_hold_s` | 0,5 s | Julien reprend 0,5 s après la dernière tentative |
+| `[overlaps] merge_gap_s` | 0,5 s | Une pause de 0,3 s de Julien ne termine pas son tour |
+| `[levels] own_speech_gap_s` | 0,2 s | Le filtre de repisse, trame par trame, coupe entre les syllabes |
+| Bruit de fond | silence numérique exclu | Sinon plancher à -120 dB et chaque souffle compte comme un son fort |
+
+Résultat attendu : 3 chevauchements (47,7 s, 50,2 s, 50,8 s), 1 extrait de film (62,3 – 67,4 s), 5 blancs raccourcis (6,8 s retirées) ; vérifié par les tests lents de `tests/test_pipeline.py`.
 
 ## Points de vigilance
 

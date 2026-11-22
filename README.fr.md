@@ -31,18 +31,30 @@ Le mode `--dry-run` écrit le rapport et les timecodes sans toucher à l'audio.
 - Un fichier de montage Markdown par épisode : les timecodes (sur l'audio original et sur l'audio final) et un rapport (loudness avant et après, ce qui a été retiré, ce qui a été signalé).
 - Des marqueurs dans un fichier MIDI et dans le WAV du mixage, pour Logic Pro et Cakewalk.
 
-## Commandes
-
-Interface prévue, disponible à partir du jalon 1 :
+## Installer
 
 ```bash
+brew install ffmpeg            # macOS (Windows : winget install ffmpeg)
 uv tool install git+https://github.com/IvesPower/podcleaner-editor
-pedit init       # quelques questions, puis écrit ton fichier de configuration
-pedit run --voice julien.wav --voice marc.wav --film film.wav --out episode-42 --dry-run
-pedit config     # affiche la configuration (--path : seulement son emplacement)
 ```
 
-`podcleaner-editor` et son alias court `pedit` sont la même commande. Dans un terminal, elle commence par son titre en pixel art. Le programme s'affiche en anglais.
+`podcleaner-editor` et son alias court `pedit` sont la même commande. Le programme s'affiche en anglais.
+
+## Lancer
+
+L'analyse fonctionne déjà, en mode dry-run : elle écrit le fichier de montage, pas encore l'audio.
+
+```bash
+# Un fichier par voix
+pedit run --voice julien.wav --voice franck.wav --film film.wav --out "Episode 42" --dry-run
+
+# Les deux voix sur un seul fichier stéréo
+pedit run --voice voix.wav --film film.wav --out "Episode 42" --dry-run
+```
+
+La commande écrit `Episode 42/Episode 42.edit.md` : les extraits de film, les tentatives de parler par-dessus l'autre, les longs blancs qui seront raccourcis, avec leurs timecodes sur l'audio original et sur l'audio monté. `--name` donne le nom de l'épisode (par défaut, le nom du dossier `--out`).
+
+À venir : `pedit init` (quelques questions, puis écrit ton fichier de configuration), `pedit config`, et l'audio monté lui-même.
 
 ## Claude, en option
 

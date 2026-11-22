@@ -29,6 +29,18 @@ def test_defaults_match_spec():
     assert s.speakers == ("Voice A", "Voice B")
 
 
+def test_overlap_defaults_tuned_on_the_test_recording():
+    # Tuned on samples/pedit (Julien, 2026-11-22): three talk-overs of 0.17 to 0.6 s.
+    s = Settings()
+    assert (s.overlap_min_s, s.overlap_floor_hold_s, s.overlap_merge_gap_s) == (0.15, 0.5, 0.5)
+    assert s.own_speech_gap_s == 0.2
+
+
+def test_own_speech_gap_is_read_from_levels(tmp_path):
+    path = _write(tmp_path / "c.toml", "[levels]\nown_speech_gap_s = 0.1\n")
+    assert load_settings(path).own_speech_gap_s == 0.1
+
+
 def test_missing_file_gives_defaults(tmp_path):
     assert load_settings(tmp_path / "nope.toml") == Settings()
 
