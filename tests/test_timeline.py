@@ -1,7 +1,7 @@
 import pytest
 
 from podcleaner_editor.timeline import Interval as I
-from podcleaner_editor.timeline import format_tc, intersect, invert, merge, union
+from podcleaner_editor.timeline import format_tc, intersect, invert, merge, subtract, union
 
 
 def test_merge_joins_close_intervals():
@@ -51,3 +51,13 @@ def test_interval_rejects_negative_duration():
 
 def test_interval_duration():
     assert I(1.5, 4).duration == 2.5
+
+
+def test_subtract():
+    assert subtract([I(0, 10)], [I(2, 3), I(5, 6)]) == [I(0, 2), I(3, 5), I(6, 10)]
+
+
+def test_subtract_edges_and_disjoint():
+    assert subtract([I(0, 10)], [I(-1, 1), I(9, 12)]) == [I(1, 9)]
+    assert subtract([I(0, 2)], [I(5, 6)]) == [I(0, 2)]
+    assert subtract([I(0, 2)], [I(0, 2)]) == []

@@ -55,6 +55,25 @@ def intersect(a: list[Interval], b: list[Interval]) -> list[Interval]:
     return result
 
 
+def subtract(a: list[Interval], b: list[Interval]) -> list[Interval]:
+    """The moments of `a` not covered by `b`."""
+    holes = merge(b)
+    result: list[Interval] = []
+    for interval in merge(a):
+        cursor = interval.start
+        for hole in holes:
+            if hole.end <= cursor:
+                continue
+            if hole.start >= interval.end:
+                break
+            if hole.start > cursor:
+                result.append(Interval(cursor, hole.start))
+            cursor = max(cursor, hole.end)
+        if cursor < interval.end:
+            result.append(Interval(cursor, interval.end))
+    return result
+
+
 def invert(intervals: list[Interval], total: float) -> list[Interval]:
     """The gaps between the intervals, within [0, total]."""
     gaps: list[Interval] = []
