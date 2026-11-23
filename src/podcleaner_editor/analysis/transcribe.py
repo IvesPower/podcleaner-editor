@@ -58,7 +58,7 @@ class _MlxTranscriber:
             result = self._transcribe(mlx_whisper, audio)
         except Exception as exc:
             if self._loaded:
-                raise
+                raise EditorError(f"Could not transcribe with {self.name}: {exc}") from exc
             raise EditorError(f"Could not load the Whisper model {self.model}: {exc}") from exc
         self._loaded = True
         raw = [
@@ -79,6 +79,10 @@ class _MlxTranscriber:
         )
 
 
+# Words in the errors of a GPU that cannot run the model (missing CUDA libraries, old driver).
+_GPU_ERRORS = ("cuda", "cudnn", "cublas")
+
+
 class _FasterWhisperTranscriber:
     def __init__(self, settings: Settings) -> None:
         self.model = settings.whisper_model
@@ -86,15 +90,29 @@ class _FasterWhisperTranscriber:
         self._language = settings.transcription_language
         self._prompt = settings.transcription_prompt
         self._model: Any = None
+        self._device: str | None = None  # None: faster-whisper picks the GPU when it finds one
+        self._used = False
 
     def words(self, audio: np.ndarray, offset: float) -> list[Word]:
-        if self._model is None:
+        try:
+            raw = self._raw_words(audio)
+        except Exception as exc:
+            if self._used or self._device == "cpu" or not _is_gpu_error(exc):
+                raise self._error(exc) from exc
+            self._model, self._device = None, "cpu"  # the GPU cannot run it: once more on the CPU
             try:
-                from faster_whisper import WhisperModel  # imported late: loading it is slow
+                raw = self._raw_words(audio)
+            except Exception as retry_exc:
+                raise self._error(retry_exc) from retry_exc
+        self._used = True
+        return _words_from(raw, offset)
 
-                self._model = WhisperModel(self.model, compute_type="int8")
-            except Exception as exc:
-                raise EditorError(f"Could not load the Whisper model {self.model}: {exc}") from exc
+    def _raw_words(self, audio: np.ndarray) -> list[tuple[str, float, float]]:
+        if self._model is None:
+            from faster_whisper import WhisperModel  # imported late: loading it is slow
+
+            device = {"device": self._device} if self._device else {}
+            self._model = WhisperModel(self.model, compute_type="int8", **device)
         segments, _ = self._model.transcribe(
             audio.astype(np.float32),
             language=self._language,
@@ -102,8 +120,18 @@ class _FasterWhisperTranscriber:
             word_timestamps=True,
             condition_on_previous_text=False,
         )
-        raw = [(w.word, float(w.start), float(w.end)) for s in segments for w in (s.words or [])]
-        return _words_from(raw, offset)
+        # `segments` is lazy: the transcription runs, and can fail, while it is read.
+        return [(w.word, float(w.start), float(w.end)) for s in segments for w in (s.words or [])]
+
+    def _error(self, exc: Exception) -> EditorError:
+        if self._model is None:
+            return EditorError(f"Could not load the Whisper model {self.model}: {exc}")
+        return EditorError(f"Could not transcribe with {self.name}: {exc}")
+
+
+def _is_gpu_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(word in text for word in _GPU_ERRORS)
 
 
 def make_transcriber(settings: Settings) -> Transcriber:
