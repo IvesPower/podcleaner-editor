@@ -1,3 +1,4 @@
+import re
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -350,6 +351,30 @@ def test_run_writes_the_words_cache(episode_files, tmp_path, monkeypatch):
     path = pipeline.run(load_episode([a, b], film, "Episode 7", SETTINGS), SETTINGS, out)
     assert (out / "Episode 7.words.json").is_file()
     assert "### Transcription" in path.read_text(encoding="utf-8")
+
+
+def test_run_reports_an_unwritable_output_folder(episode_files, tmp_path, monkeypatch):
+    a, b, film = episode_files
+    monkeypatch.setattr(pipeline, "speech_intervals", lambda s, st: [I(0, 20)])
+    out = tmp_path / "taken"
+    out.write_text("a file, not a folder", encoding="utf-8")
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    with pytest.raises(EditorError, match=re.escape(f"Could not write to {out}: ")):
+        pipeline.run(episode, SETTINGS, out)
+
+
+def test_run_reports_an_unwritable_words_cache(episode_files, tmp_path, monkeypatch):
+    a, b, film = episode_files
+    monkeypatch.setattr(pipeline, "speech_intervals", lambda s, st: [I(0, 20)])
+
+    def failing(*args):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(pipeline, "save_words", failing)
+    out = tmp_path / "out"
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    with pytest.raises(EditorError, match=re.escape(f"Could not write to {out}: read-only")):
+        pipeline.run(episode, SETTINGS, out)
 
 
 def _cli(*args):

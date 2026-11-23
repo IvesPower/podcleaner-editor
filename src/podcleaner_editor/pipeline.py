@@ -27,6 +27,7 @@ from podcleaner_editor.detect.markers import find_markers
 from podcleaner_editor.detect.overlaps import find_overlap_attempts
 from podcleaner_editor.detect.silences import find_silence_cuts
 from podcleaner_editor.episode import Episode
+from podcleaner_editor.errors import EditorError
 from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.report.markdown import AnalysisResult, render_edit_file
 from podcleaner_editor.timeline import Interval, subtract, union
@@ -78,13 +79,17 @@ def _transcribe(
         progress(message if transcribed else message + _DOWNLOAD_NOTE)
         transcribed = True
         transcriber = transcriber or make_transcriber(settings)
+        # Decoded a second time (after the VAD pass) so only one voice is in memory here.
         samples = decode(track.info.path)
         heard = transcribe_passages(samples, passages, transcriber)
         del samples  # free this voice before decoding the next one
         if episode.layout == "separate":
             heard = keep_own_words(heard, own_track, pad)
         if cache_path:
-            save_words(cache_path, track.label, key, heard)
+            try:
+                save_words(cache_path, track.label, key, heard)
+            except OSError as exc:
+                raise EditorError(f"Could not write to {cache_path.parent}: {exc}") from exc
         words[track.label] = heard
     backend = transcriber.name if transcribed and transcriber else "cache"
     return words, TranscriptionInfo(backend, speech_s, cached)
@@ -156,6 +161,7 @@ def analyze(
     film = decode(episode.film.info.path)
     voice_levels = [frame_levels(x, ANALYSIS_RATE, hop) for x in voices]
     film_levels = frame_levels(film, ANALYSIS_RATE, hop)
+    del film  # only its levels are needed from here on
 
     progress("Detecting speech…")
     speech = [vad(x, settings) for x in voices]
@@ -233,8 +239,14 @@ def run(
 ) -> Path:
     """Analyses the episode and writes `<out_dir>/<name>.edit.md`; returns its path."""
     cache_path = out_dir / f"{episode.name}.words.json"
-    result = analyze(episode, settings, cache_path=cache_path, progress=progress)
-    out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{episode.name}.edit.md"
-    path.write_text(render_edit_file(result, __version__, date.today()), encoding="utf-8")
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)  # before the analysis, so it fails early
+    except OSError as exc:
+        raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
+    result = analyze(episode, settings, cache_path=cache_path, progress=progress)
+    try:
+        path.write_text(render_edit_file(result, __version__, date.today()), encoding="utf-8")
+    except OSError as exc:
+        raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
     return path
