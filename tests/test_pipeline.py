@@ -230,6 +230,54 @@ def test_euh_that_swallows_a_gap_is_not_a_silence(quiet_film_files):
     assert result.cuts.removed() == pytest.approx(removed)
 
 
+def test_euh_inside_an_instruction_is_not_counted_twice(quiet_film_files):
+    a, b, film = quiet_film_files
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    julien = _words(
+        ("Claude,", 20.0, 20.3),
+        ("ici", 20.4, 20.6),
+        ("euh", 20.8, 21.0),
+        ("on", 21.2, 21.4),
+        ("coupe.", 21.5, 21.9),
+    )
+    fake = _FakeTranscriber({"julien": julien})
+    result = _analyze(episode, fake, _fake_vad({90: [I(19, 23)], 91: [I(50, 55)]}))
+    assert len(result.marker_cuts) == 1
+    [filler] = result.fillers
+    assert filler.cut is None and filler.reason == "Inside a spoken instruction"
+
+
+def _mixed_with_words(files, words, speech):
+    """Mixed layout, every word transcribed (one passage), the VAD hearing only `speech`."""
+    a, _, film = files
+    episode = load_episode([a], film, "ep", SETTINGS)
+    settings = replace(SETTINGS, passage_gap_s=20.0)
+    fake = _FakeTranscriber({"julien": words})
+    return _analyze(episode, fake, lambda samples, st: speech, settings)
+
+
+def test_silence_split_by_a_speech_cut_counts_once(quiet_film_files):
+    # Whisper hears an "euh" the VAD left out, in the middle of a long silence.
+    words = _words(("bonjour", 19.5, 20.0), ("euh", 25.0, 25.4), ("voilà", 30.0, 30.5))
+    result = _mixed_with_words(quiet_film_files, words, [I(15, 20), I(30, 45)])
+    [filler] = result.fillers
+    assert filler.cut is not None
+    inside = [c for c in result.silence_cuts.cuts if 20 < c.start < 30]
+    assert len(inside) == 2  # either side of the "euh" cut
+    # 0-15 s, 20-30 s, 45-80 s and 85-90 s: four silences, not five.
+    assert len(result.silence_cuts.cuts) == 5
+    assert result.silences_shortened == 4
+
+
+def test_silence_sliver_of_one_frame_is_dropped(quiet_film_files):
+    # The silence cut starts at 20.2 s; the "euh" cut starts one frame later, at 20.21 s.
+    words = _words(("bonjour", 19.5, 20.205), ("euh", 20.25, 20.6), ("voilà", 25.0, 25.5))
+    result = _mixed_with_words(quiet_film_files, words, [I(15, 20), I(25, 45)])
+    [filler] = result.fillers
+    assert filler.cut.start == pytest.approx(20.21)
+    assert [c for c in result.silence_cuts.cuts if 20 <= c.start < 25] == [I(filler.cut.end, 24.8)]
+
+
 def test_second_run_reads_the_cache(quiet_film_files, tmp_path):
     a, b, film = quiet_film_files
     episode = load_episode([a, b], film, "ep", SETTINGS)
@@ -414,13 +462,14 @@ def _run_and_check(tmp_path, voices, name: str) -> str:
     markers = [(r[1], _seconds(r[3])) for r in rows if r[1] in ("Clip to add", "Requested cut")]
     assert [t for t, _ in markers] == [t for t, _ in EXPECTED_MARKERS]
     assert _near([s for _, s in markers], [s for _, s in EXPECTED_MARKERS])
-    assert "3 spoken markers: 2 requested cuts, 1 clip to add; 3 phrases removed" in text
+    assert "3 spoken markers: 2 requested cuts, 1 clip to add; 3 instructions removed" in text
     clips = [r for r in rows if r[1] == "Film clip"]
     assert len(clips) == 1 and _near([_seconds(clips[0][3])], [62.27])
     assert _near([_seconds(clips[0][5])], [5.16])
-    # M1's five silences, less the parts the instructions and "euh"s now remove; a 10 ms
-    # piece is left between the "euh" at 39.7 s and the instruction after it.
-    assert "6 silences shortened, 00:00:06.9" in text
+    # Six silences once the speech is cut: the one the instruction at 18.7 s splits counts
+    # once, the ones under the "euh" at 13.2 s and the instruction at 40.3 s are left to them
+    # (the 10 ms piece the instruction leaves is dropped).
+    assert "4 silences shortened, 00:00:06.9" in text
     assert "mlx-whisper" in text or "faster-whisper" in text
 
     # The cut "euh"s are not listed in the edit file: read them back from the words cache.

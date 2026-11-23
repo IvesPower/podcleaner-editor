@@ -87,6 +87,19 @@ def test_one_silence_is_singular():
     assert "1 silence shortened, 00:00:02.000 removed." in _render(cuts=[I(10, 12)])
 
 
+def test_split_silence_counts_once():
+    result = AnalysisResult(
+        SEPARATE, [], CutMap((I(10, 12), I(12.5, 13))), True, silences_shortened=1
+    )
+    text = render_edit_file(result, "0.1.0", DAY)
+    assert "1 silence shortened, 00:00:02.500 removed." in text
+
+
+def test_cuts_computed_once():
+    result = AnalysisResult(SEPARATE, [], CutMap((I(10, 12),)), True)
+    assert result.cuts is result.cuts
+
+
 def test_separate_layout_counts_overlaps():
     assert "### Overlaps\n\n1 attempt to take the floor flagged.\n" in _render(events=[OVERLAP])
     assert "0 attempts to take the floor flagged." in _render()
@@ -166,7 +179,7 @@ def test_markers_section_counts_by_type():
     text = _render_full(events=events, marker_cuts=[I(5, 6), I(15, 16.1), I(25, 28)])
     assert (
         "### Markers\n\n3 spoken markers: 2 requested cuts, 1 clip to add; "
-        "3 phrases removed (00:00:05.100).\n"
+        "3 instructions removed (00:00:05.100).\n"
     ) in text
     assert "No spoken markers." in _render_full()
 

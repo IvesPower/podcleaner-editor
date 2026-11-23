@@ -1,6 +1,7 @@
 """The analysis of an episode, from the tracks to the edit file."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from podcleaner_editor.analysis.words_cache import cache_key, load_words, save_w
 from podcleaner_editor.audio_io import ANALYSIS_RATE, decode_mono_16k, frame_levels
 from podcleaner_editor.config import Settings
 from podcleaner_editor.cutmap import CutMap
-from podcleaner_editor.detect.fillers import find_fillers
+from podcleaner_editor.detect.fillers import INSIDE_INSTRUCTION, Filler, find_fillers
 from podcleaner_editor.detect.markers import find_markers
 from podcleaner_editor.detect.overlaps import find_overlap_attempts
 from podcleaner_editor.detect.silences import find_silence_cuts
@@ -34,6 +35,8 @@ Decoder = Callable[[Path], np.ndarray]
 Vad = Callable[[np.ndarray, Settings], list[Interval]]
 
 _DOWNLOAD_NOTE = " (the Whisper model is downloaded on first use, about 1.6 GB)"
+# Float sums are not exact: a piece this close to one level frame counts as one frame.
+_EPSILON = 1e-9
 
 
 def _loud(levels: np.ndarray, settings: Settings) -> list[Interval]:
@@ -96,6 +99,36 @@ def _other_speech(
         return {label: [] for label in labels}
     heard = [union(own[i], [w.span for w in words[label]]) for i, label in enumerate(labels)]
     return {labels[0]: heard[1], labels[1]: heard[0]}
+
+
+def _outside_instructions(fillers: list[Filler], marker_cuts: list[Interval]) -> list[Filler]:
+    """The fillers, with those cut inside a spoken instruction's cut left to the instruction."""
+
+    def inside(cut: Interval) -> bool:
+        return any(m.start <= cut.start and cut.end <= m.end for m in marker_cuts)
+
+    return [
+        replace(f, cut=None, reason=INSIDE_INSTRUCTION) if f.cut and inside(f.cut) else f
+        for f in fillers
+    ]
+
+
+def _silence_pieces(
+    cuts: list[Interval], speech_cuts: list[Interval], hop: float
+) -> tuple[list[Interval], int]:
+    """What the speech cuts leave of the silence cuts, pieces of one level frame or less left
+    out, and how many silences keep a piece.
+
+    A silence the speech cuts already remove is reported with them, not as a silence.
+    """
+    pieces = [p for p in subtract(cuts, speech_cuts) if p.duration > hop + _EPSILON]
+    shortened, k = 0, 0
+    for cut in cuts:  # both lists are sorted and each piece lies in one cut
+        kept = False
+        while k < len(pieces) and pieces[k].start < cut.end:
+            kept, k = True, k + 1
+        shortened += kept
+    return pieces, shortened
 
 
 def analyze(
@@ -170,19 +203,20 @@ def analyze(
     ]
     events += [m.event for m in markers]
     marker_cuts = [m.cut for m in markers if m.cut is not None]
+    fillers = _outside_instructions(fillers, marker_cuts)
     speech_cuts = [*(f.cut for f in fillers if f.cut is not None), *marker_cuts]
 
     progress("Looking for long silences…")
     loud = [_loud(levels, settings) for levels in voice_levels]
     activities = [subtract(x, speech_cuts) for x in [*own, *loud]]
     cuts = find_silence_cuts([*activities, film_on], episode.duration, settings)
-    # A silence the speech cuts already remove is reported with them, not as a silence.
-    silence_cuts = [c for c in subtract(cuts, speech_cuts) if c.duration > 0]
+    silence_cuts, shortened = _silence_pieces(cuts, speech_cuts, hop)
 
     return AnalysisResult(
         episode=episode,
         events=sorted(events, key=lambda e: (e.start, e.end)),
         silence_cuts=CutMap(tuple(silence_cuts)),
+        silences_shortened=shortened,
         dry_run=True,
         fillers=tuple(fillers),
         marker_cuts=tuple(sorted(marker_cuts)),

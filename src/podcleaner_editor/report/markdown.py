@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import date
+from functools import cached_property
 
 from podcleaner_editor.analysis.transcribe import TranscriptionInfo
 from podcleaner_editor.cutmap import CutMap
@@ -22,10 +23,12 @@ class AnalysisResult:
     fillers: tuple[Filler, ...] = ()
     marker_cuts: tuple[Interval, ...] = ()
     transcription: TranscriptionInfo | None = None
+    # Silences shortened, when a speech cut splits some of them; None: one per silence cut.
+    silences_shortened: int | None = None
 
-    @property
+    @cached_property
     def cuts(self) -> CutMap:
-        """Every cut: silences, cut hesitations and marker phrases."""
+        """Every cut: silences, cut hesitations and spoken instructions."""
         filler_cuts = [f.cut for f in self.fillers if f.cut is not None]
         return CutMap(tuple(merge([*self.silence_cuts.cuts, *filler_cuts, *self.marker_cuts])))
 
@@ -89,7 +92,8 @@ def _duration(result: AnalysisResult) -> str:
 
 def _silences(result: AnalysisResult) -> str:
     cuts = result.silence_cuts
-    return f"{_plural(len(cuts.cuts), 'silence')} shortened, {format_tc(cuts.removed())} removed."
+    count = len(cuts.cuts) if result.silences_shortened is None else result.silences_shortened
+    return f"{_plural(count, 'silence')} shortened, {format_tc(cuts.removed())} removed."
 
 
 _NOT_TRANSCRIBED = "Not available: the episode was not transcribed."
@@ -135,7 +139,7 @@ def _markers(result: AnalysisResult) -> str:
     return (
         f"{_plural(cut_requests + clips, 'spoken marker')}: "
         f"{_plural(cut_requests, 'requested cut')}, {clip_text}; "
-        f"{_plural(len(result.marker_cuts), 'phrase')} removed ({removed})."
+        f"{_plural(len(result.marker_cuts), 'instruction')} removed ({removed})."
     )
 
 

@@ -18,6 +18,7 @@ from podcleaner_editor.timeline import Interval
 
 CUT_REASON = "Isolated hesitation"
 TOO_LONG = "Too long to be sure it is a hesitation"
+INSIDE_INSTRUCTION = "Inside a spoken instruction"
 
 _CONTEXT_WORDS = 4
 
