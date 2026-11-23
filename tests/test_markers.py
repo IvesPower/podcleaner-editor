@@ -62,9 +62,31 @@ def test_dis_claude_supprimer_is_a_cut():
 
 
 def test_spec_phrase_after_a_pause():
-    words, [m] = _find("alors bon / Claude ici on veut couper / voilà")
+    words, [m] = _find("alors bon / Claude, ici on veut couper / voilà")
     assert m.event.type == EventType.CUT_REQUEST
     assert (m.event.start, m.event.end) == (words[2].start, words[6].end)
+
+
+def test_claude_followed_by_a_pause_is_a_call():
+    _, [m] = _find("Claude / ici on veut couper.")
+    assert _heard(m) == "Claude ici on veut couper."
+
+
+def test_claude_without_comma_or_pause_is_ignored():
+    _, found = _find("alors bon / Claude ici on veut couper / voilà")
+    assert found == []
+
+
+def test_claude_as_a_first_name_is_ignored():
+    _, found = _find("je parle du film. Claude Chabrol a coupé la scène finale.")
+    assert found == []
+    _, found = _find("Bon. Claude Lelouch, dans cet extrait…")
+    assert found == []
+
+
+def test_dis_mid_sentence_is_ignored():
+    _, found = _find("je te le dis Claude, coupe ça.")
+    assert found == []
 
 
 def test_claude_mid_sentence_is_ignored():
@@ -95,6 +117,16 @@ def test_instruction_capped_at_max_s():
     assert found == []  # the action word comes after the cap
     _, [m] = _find("Claude, coupe tout ça maintenant", settings=settings)
     assert _heard(m) == "Claude, coupe tout"
+    assert m.cut is None
+    assert m.event.reason.endswith("; instruction kept: no clear end")
+
+
+def test_max_s_counts_from_dis():
+    settings = replace(SETTINGS, marker_max_s=1.2)
+    _, [m] = _find("Dis Claude, coupe ça.", settings=settings)  # from Claude: 1.1 s
+    assert _heard(m) == "Dis Claude, coupe"
+    assert m.cut is None
+    assert m.event.reason.endswith("; instruction kept: no clear end")
 
 
 def test_two_instructions_in_a_row():
@@ -103,13 +135,13 @@ def test_two_instructions_in_a_row():
 
 
 def test_instruction_under_other_speech_is_kept_in_audio():
-    _, [m] = _find("Claude ici on veut couper", other=[I(0.0, 10.0)])
+    _, [m] = _find("Claude, ici on veut couper", other=[I(0.0, 10.0)])
     assert m.cut is None
     assert m.event.reason.endswith("; instruction kept: Other speech at the same time")
 
 
 def test_instruction_during_a_film_clip_is_kept_in_audio():
-    _, [m] = _find("Claude ici on veut couper", film=[I(1.5, 2.0)])
+    _, [m] = _find("Claude, ici on veut couper", film=[I(1.5, 2.0)])
     assert m.cut is None
     assert m.event.reason.endswith("; instruction kept: During a film clip")
 

@@ -87,7 +87,7 @@ def _words(*items: tuple[str, float, float]) -> list[Word]:
 
 
 MARKER_AT_20 = _words(
-    ("Claude", 20.0, 20.3),
+    ("Claude,", 20.0, 20.3),
     ("ici", 20.3, 20.5),
     ("on", 20.5, 20.7),
     ("veut", 20.7, 21.0),

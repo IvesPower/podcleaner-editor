@@ -9,8 +9,11 @@ from rapidfuzz import fuzz
 from podcleaner_editor.analysis.words import Word, normalize
 from podcleaner_editor.config import Settings
 from podcleaner_editor.detect.cuts import OTHER_SPEECH, blocking_reason, word_cut_window
+from podcleaner_editor.detect.fillers import is_filler
 from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.timeline import Interval
+
+NO_CLEAR_END = "no clear end"
 
 _SENTENCE_END = (".", "?", "!", "…")
 # French on purpose: "dis Claude" ("say, Claude") opens an instruction.
@@ -37,32 +40,53 @@ def _pause_after(words: list[Word], i: int, pause_s: float) -> bool:
     return i + 1 < len(words) and words[i + 1].start - words[i].end >= pause_s
 
 
+def _skipped(word: Word, settings: Settings) -> bool:
+    """Punctuation alone or a hesitation: it does not stop the next word starting a sentence."""
+    return not _tokens(word) or is_filler(word.text, settings.filler_words)
+
+
+def _sentence_start(words: list[Word], i: int, settings: Settings) -> bool:
+    """Word `i` begins a sentence: first word, after . ? ! …, or after a pause."""
+    while i > 0:
+        previous = words[i - 1]
+        if _ends_sentence(previous) or words[i].start - previous.end >= settings.marker_pause_s:
+            return True
+        if not _skipped(previous, settings):
+            return False
+        i -= 1
+    return True
+
+
 def _start(words: list[Word], i: int, settings: Settings) -> int | None:
-    """Where the instruction begins when word `i` is the trigger at a sentence start, or None."""
+    """Where the instruction begins when word `i` is a call to Claude, or None.
+
+    A call is "dis Claude" with "dis" at a sentence start, or "Claude" at a sentence start
+    followed by a comma or a pause.
+    """
     tokens = _tokens(words[i])
     trigger = normalize(settings.marker_trigger)
     if not tokens or fuzz.ratio(tokens[0], trigger) < settings.marker_min_score:
         return None
-    if i == 0:
-        return i
-    previous = _tokens(words[i - 1])
-    if previous and previous[-1] == _CALL_WORD:
-        return i - 1
-    if _ends_sentence(words[i - 1]) or _pause_after(words, i - 1, settings.marker_pause_s):
-        return i
-    return None
+    previous = _tokens(words[i - 1]) if i > 0 else []
+    if previous == [_CALL_WORD]:
+        return i - 1 if _sentence_start(words, i - 1, settings) else None
+    if not _sentence_start(words, i, settings):
+        return None
+    called = words[i].text.strip().endswith(",") or _pause_after(words, i, settings.marker_pause_s)
+    return i if called else None
 
 
-def _end(words: list[Word], first: int, settings: Settings) -> int:
-    """The last word of the instruction that begins at `first`."""
-    last = first
-    for j in range(first, len(words)):
+def _end(words: list[Word], first: int, trigger: int, settings: Settings) -> tuple[int, bool]:
+    """The last word of the instruction that begins at `first`, and whether it ends clearly
+    (sentence end, pause or last word) rather than at `marker_max_s`."""
+    last = trigger
+    for j in range(trigger + 1, len(words)):
         if words[j].end - words[first].start > settings.marker_max_s:
-            break
+            return last, False
         last = j
         if _ends_sentence(words[j]) or _pause_after(words, j, settings.marker_pause_s):
             break
-    return last
+    return last, True
 
 
 def _overlapped(words: list[Word], first: int, last: int, window: Interval) -> bool:
@@ -105,11 +129,22 @@ def find_markers(
         if first is None:
             i += 1
             continue
-        last = _end(words, i, settings)
+        last, clear_end = _end(words, first, i, settings)
         event_type = _event_type(words[first : last + 1], settings)
         if event_type is not None:
             markers.append(
-                _marker(words, first, last, event_type, track, other_speech, film, levels, settings)
+                _marker(
+                    words,
+                    first,
+                    last,
+                    clear_end,
+                    event_type,
+                    track,
+                    other_speech,
+                    film,
+                    levels,
+                    settings,
+                )
             )
         i = last + 1
     return markers
@@ -119,6 +154,7 @@ def _marker(
     words: list[Word],
     first: int,
     last: int,
+    clear_end: bool,
     event_type: EventType,
     track: str,
     other_speech: list[Interval],
@@ -139,7 +175,8 @@ def _marker(
         settings.filler_snap_s,
     )
     # Mixed layout: the other voice's words are on this track, around or inside the instruction.
-    blocked = OTHER_SPEECH if _overlapped(words, first, last, window) else None
+    blocked = None if clear_end else NO_CLEAR_END
+    blocked = blocked or (OTHER_SPEECH if _overlapped(words, first, last, window) else None)
     blocked = blocked or blocking_reason(window, other_speech, film)
     if blocked is not None:
         reason += f"; instruction kept: {blocked}"
