@@ -9,6 +9,7 @@ from typing import Any, Literal, get_args
 
 from platformdirs import user_config_dir
 
+from podcleaner_editor.analysis.words import normalize
 from podcleaner_editor.errors import EditorError
 
 APP_NAME = "podcleaner-editor"
@@ -201,8 +202,22 @@ def load_settings(path: Path) -> Settings:
             if (section, key) not in _KEYS:
                 raise EditorError(f"{path}: unknown setting [{section}] {key}")
             name = _KEYS[(section, key)][0]
-            values[name] = _convert(name, raw, f"{path}: [{section}] {key}")
+            label = f"{path}: [{section}] {key}"
+            values[name] = _convert(name, raw, label)
+            if name in _SINGLE_WORDS:
+                _check_single_words(values[name], label)
     return Settings(**values)
+
+
+# Matched against one transcribed word at a time.
+_SINGLE_WORDS = ("marker_trigger", "marker_cut_words", "marker_clip_words")
+
+
+def _check_single_words(value: str | tuple[str, ...], label: str) -> None:
+    words = (value,) if isinstance(value, str) else value
+    if any(len(normalize(w).split()) != 1 for w in words):
+        many = "single words" if isinstance(value, tuple) else "a single word"
+        raise EditorError(f"{label} must be {many}")
 
 
 def _convert(name: str, raw: Any, label: str) -> Any:

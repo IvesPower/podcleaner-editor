@@ -152,6 +152,29 @@ def test_filler_words_must_be_non_empty_strings(tmp_path, words):
         load_settings(path)
 
 
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("trigger", '"dis Claude"'),
+        ("trigger", '"!?"'),
+        ("cut_words", '["couper", "on coupe"]'),
+        ("clip_words", '["ajoute", "mets-le"]'),
+    ],
+)
+def test_marker_words_must_be_single_words(tmp_path, key, value):
+    path = _write(tmp_path / "c.toml", f"[markers]\n{key} = {value}\n")
+    with pytest.raises(
+        EditorError, match=rf"\[markers\] {key} must be (a single word|single words)"
+    ):
+        load_settings(path)
+
+
+def test_marker_words_may_carry_accents_and_case(tmp_path):
+    path = _write(tmp_path / "c.toml", '[markers]\ntrigger = "Clôde,"\ncut_words = ["Supprimer"]\n')
+    settings = load_settings(path)
+    assert settings.marker_trigger == "Clôde," and settings.marker_cut_words == ("Supprimer",)
+
+
 def test_template_round_trips_new_settings(tmp_path):
     path = _write(tmp_path / "c.toml", render_template(settings_values(Settings())))
     assert load_settings(path) == Settings()
