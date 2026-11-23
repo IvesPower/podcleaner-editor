@@ -12,7 +12,7 @@ Un outil en ligne de commande qui fait le travail répétitif du montage d'un é
 - **Blancs** : raccourcit à environ 0,4 s tout silence de plus de 1 s où toutes les pistes se taisent, avec un fondu.
 - **Hésitations** : retire les « euh » isolés qui ne cassent pas la phrase, signale les autres.
 - **Paroles qui se chevauchent** : pose un timecode chaque fois qu'une personne tente de parler par-dessus l'autre sans prendre la parole.
-- **Marqueurs vocaux** : repère les consignes dites à voix haute à Claude, une phrase qui commence par « Claude » (ou « dis Claude ») et contient un verbe d'action, comme « Dis Claude, on va couper ce passage-là » ou « Claude, ajoute un extrait ici », et retire la consigne elle-même de l'audio.
+- **Marqueurs vocaux** : repère les consignes dites à voix haute à Claude, un appel en début de phrase, « dis Claude » ou « Claude » suivi d'une virgule ou d'une pause (pour qu'un prénom comme « Claude Chabrol » ne compte pas), puis un verbe d'action, comme « Dis Claude, on va couper ce passage-là » ou « Claude, ajoute un extrait ici », et retire la consigne elle-même de l'audio.
 - **Extraits de film** : repère chaque passage diffusé pendant l'enregistrement, grâce à l'activité sur la piste film.
 - **Suggestions de coupe** : propose des passages à retirer, avec la raison (avec Claude).
 

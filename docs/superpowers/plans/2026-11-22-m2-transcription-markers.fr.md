@@ -19,7 +19,7 @@
 - Sans Claude, tout fonctionne avec des règles fixes ; le M2 ne sollicite pas Claude.
 - Règle d'un « euh » (choisie par Julien le 22 nov. 2026, « large ») : tout mot d'hésitation seul est coupé, sauf si un autre mot ou la parole de l'autre voix tombe dans sa fenêtre de coupe, ou un extrait de film, ou s'il dure plus de `filler_max_s` ; ceux-là sont signalés, jamais coupés. Claude (M5) pourra annuler une coupe.
 - Voix mélangées : un « euh » n'est candidat à la coupe que si aucun autre mot transcrit ne chevauche la fenêtre de coupe (cahier des charges).
-- Marqueurs vocaux : une consigne qui commence par « Claude » en début de phrase et contient un verbe d'action (règle changée par Julien le 22 nov. 2026 après l'enregistrement de test, à la place des phrases fixes) donne un événement `Requested cut` ou `Clip to add` dans les Timecodes, et la consigne elle-même est coupée de l'audio (choisi par Julien le 22 nov. 2026), à la même condition « aucune autre parole, pas de film ».
+- Marqueurs vocaux : un appel explicite à Claude en début de phrase (« dis Claude », ou « Claude » suivi d'une virgule ou d'une pause ; décidé par Julien le 23 nov. 2026) suivi d'une consigne qui contient un verbe d'action (règle changée par Julien le 22 nov. 2026 après l'enregistrement de test, à la place des phrases fixes) donne un événement `Requested cut` ou `Clip to add` dans les Timecodes, et la consigne elle-même est coupée de l'audio (choisi par Julien le 22 nov. 2026), à la même condition « aucune autre parole, pas de film ».
 - Les coupes sont identiques sur toutes les pistes : toute coupe (blanc, « euh », marqueur) est bloquée par de la parole sur une autre piste.
 - `--dry-run` n'écrit toujours aucun audio ; le cache des mots (JSON) est permis.
 - Texte français permis dans le code et la configuration seulement pour la parole à reconnaître : le déclencheur et les verbes d'action des marqueurs, les mots d'hésitation et l'invite de Whisper.
@@ -220,8 +220,9 @@ def test_long_euh_is_flagged(): ...                       # 2,0 s → "Too long 
 - Utilise : `Word`, `normalize`, `word_cut_window`, `blocking_reason`, `OTHER_SPEECH` (tâche 4), `Event`, `EventType`, `Settings`, `rapidfuzz.fuzz.ratio`.
 - Produit : `@dataclass(frozen=True) class Marker: event: Event; cut: Interval | None` ; `find_markers(words: list[Word], track: str, other_speech: list[Interval], film: list[Interval], levels: np.ndarray, settings: Settings) -> list[Marker]`, trié par temps.
   Règle (changée par Julien le 22 nov. 2026 après l'enregistrement de test, où il donne des consignes parlées plutôt que des phrases fixes ; la première version cherchait `marker_cut_phrase` / `marker_clip_phrase` avec un score approché) :
-  - Déclencheur : un mot dont le premier jeton (`normalize`) a `fuzz.ratio(jeton, marker_trigger) >= marker_min_score`, en début de phrase : premier mot de la piste, ou le mot précédent finit par `.`, `?`, `!` ou `…`, ou l'écart depuis le mot précédent est ≥ `marker_pause_s`, ou le jeton précédent est « dis » (qui rejoint alors la consigne).
-  - La consigne va de là jusqu'au premier mot qui finit une phrase ou est suivi d'un écart ≥ `marker_pause_s`, au plus `marker_max_s`.
+  - Déclencheur : un mot dont le premier jeton (`normalize`) a `fuzz.ratio(jeton, marker_trigger) >= marker_min_score`. Un mot est en début de phrase s'il est le premier de la piste, si le mot précédent finit par `.`, `?`, `!` ou `…`, ou si l'écart depuis le mot précédent est ≥ `marker_pause_s` ; une hésitation ou une ponctuation seule devant lui ne compte pas (« Euh, dis Claude »).
+  - Appel (décidé par Julien le 23 nov. 2026, pour que « Claude Chabrol a coupé… » ou « je te le dis Claude, coupe » ne soient pas des consignes) : soit le mot précédent est « dis » et « dis » est en début de phrase (il rejoint alors la consigne), soit le déclencheur est en début de phrase et son mot finit par `,` ou est suivi d'un écart ≥ `marker_pause_s`.
+  - La consigne va de là jusqu'au premier mot après le déclencheur qui finit une phrase ou est suivi d'un écart ≥ `marker_pause_s`. Elle dure au plus `marker_max_s`, mesuré depuis son premier mot (« dis » s'il est là) ; une consigne arrêtée là reste dans l'audio (`cut = None`, raison finie par `"; instruction kept: no clear end"`).
   - C'est un marqueur seulement si elle contient un verbe d'action : le premier jeton trouvé dans `marker_cut_words` donne `CUT_REQUEST`, dans `marker_clip_words` donne `CLIP_TO_ADD`.
   - Événement : `start`/`end` = premier et dernier mot de la consigne, `track`, raison `'Spoken instruction: "<mots tels que transcrits>"'`. Coupe : `word_cut_window` avec `marker_pad_s` ; bloquée (`cut = None`, raison finie par `"; instruction kept: <raison>"`) par `blocking_reason`, ou, en `"Other speech at the same time"`, par un autre mot de la même piste dans la fenêtre ou deux mots de la consigne qui se chevauchent (forme mixte).
 
@@ -231,7 +232,9 @@ def test_long_euh_is_flagged(): ...                       # 2,0 s → "Too long 
 def test_dis_claude_ajoute_is_a_clip_to_add(): ...        # "Dis Claude, ici il faudrait qu'on ajoute un passage de son…" → CLIP_TO_ADD
 def test_dis_claude_on_va_couper_is_a_cut(): ...          # "dis Claude, on va couper ce passage-là, les dix dernières secondes." → CUT_REQUEST
 def test_dis_claude_supprimer_is_a_cut(): ...             # "dis Claude, est-ce que tu peux supprimer la phrase juste avant…" → CUT_REQUEST
-def test_spec_phrase_after_a_pause(): ...                 # pause, "Claude ici on veut couper" → CUT_REQUEST
+def test_spec_phrase_after_a_pause(): ...                 # pause, "Claude, ici on veut couper" → CUT_REQUEST
+def test_claude_as_a_first_name_is_ignored(): ...        # "…film. Claude Chabrol a coupé…", "Bon. Claude Lelouch, dans cet extrait…" → []
+def test_dis_mid_sentence_is_ignored(): ...              # "je te le dis Claude, coupe ça." → []
 def test_claude_mid_sentence_is_ignored(): ...            # "j'ai demandé à Claude de couper ça." → []
 def test_instruction_without_action_word_is_ignored(): ...  # "Bon. Claude, tu es là ?" → []
 def test_misheard_trigger_still_found(): ...              # "Cloude" (score 83) → found; "Clode" (73) → []
@@ -265,7 +268,7 @@ def test_mixed_layout_word_in_the_window_keeps_the_instruction(): ...
 ### Silences      214 silences shortened, 00:09:01.200 removed.
 ### Hesitations   153 hesitations removed (00:01:02.300), 12 flagged:
                   | Original | Final | Track | Context | Reason |   (signalés seulement)
-### Markers       3 spoken markers: 2 requested cuts, 1 clip to add; 3 phrases removed (00:00:05.100).
+### Markers       3 spoken markers: 2 requested cuts, 1 clip to add; 3 instructions removed (00:00:05.100).
 ### Overlaps      (inchangé)
 ### Transcription mlx-whisper large-v3-turbo · 00:58:40.000 of speech transcribed · 1 of 2 tracks from the cache.
 ### Claude's opinions (inchangé)

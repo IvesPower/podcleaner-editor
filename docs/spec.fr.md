@@ -2,7 +2,7 @@
 
 **Français** · [English](spec.md) — ce document est l'original et fait foi.
 
-Nov 5, 2026 · @Julien — révisé le 21 nov. 2026 (piste stéréo des deux voix, Claude par le compte intégré, interface de la CLI)
+Nov 5, 2026 · @Julien — révisé le 21 nov. 2026 (piste stéréo des deux voix, Claude par le compte intégré, interface de la CLI), révisé le 23 nov. 2026 (marqueurs vocaux : appel à Claude et verbe d'action)
 
 ## Contexte et objectif
 
@@ -18,7 +18,7 @@ L'outil tourne sur macOS et Windows et est publié en open source sur GitHub. Il
 | Blancs | Raccourcit à environ 0,4 s tout silence de plus de 1 s où toutes les pistes se taisent, avec un fondu | Silero VAD par piste, ffmpeg | Aucun |
 | Hésitations | Retire les « euh » isolés qui ne cassent pas la phrase, signale les autres | faster-whisper ou mlx-whisper (timestamps par mot), piste par piste | Juger, phrase par phrase, si une coupe reste naturelle |
 | Paroles qui se chevauchent | Repère une personne qui tente de parler par-dessus une autre sans prendre la parole ; pose un timecode, le traitement se fait à la main. Seulement avec une piste par voix | Chevauchements détectés par VAD sur chaque piste | Écarter les relances (« oui », « mmh ») et les rires pour ne signaler que les vraies tentatives |
-| Marqueurs vocaux | Repère « Claude ici on veut couper » et « Claude ici on veut ajouter un extrait » | Whisper + recherche floue (rapidfuzz) | Reconnaître les variantes de formulation |
+| Marqueurs vocaux | Repère un appel à Claude en début de phrase (« dis Claude, … » ou « Claude, … ») suivi d'une consigne qui contient un verbe d'action : couper, supprimer… pour une coupe demandée ; ajouter, extrait… pour un extrait à ajouter. La consigne est retirée de l'audio | Whisper + règles sur les mots (rapidfuzz pour le déclencheur) | Reconnaître les variantes de formulation |
 | Extraits de film | Repère chaque passage diffusé, grâce à l'activité sur la piste film | Détection d'activité sur la piste dédiée | Aucun |
 | Suggestions de coupe | Propose des passages à retirer, avec la raison | Aucun | Lecture de la transcription, guidée par des exemples tirés des épisodes déjà montés |
 

@@ -19,7 +19,7 @@
 - Without Claude, everything works with fixed rules; M2 makes no call to Claude.
 - Rule for an "euh" (chosen by Julien on 22 Nov 2026, "wide"): every standalone hesitation word is cut, unless another word or the other voice's speech falls inside its cut window, or a film clip does, or it lasts more than `filler_max_s`; those are flagged, never cut. Claude (M5) will be able to undo a cut.
 - Mixed layout: an "euh" is a cut candidate only if no other transcribed word overlaps the cut window (spec).
-- Spoken markers: an instruction that starts with "Claude" at the start of a sentence and holds an action word (rule changed by Julien on 22 Nov 2026 after the test recording, instead of fixed phrases) gives a `Requested cut` or `Clip to add` event in the Timecodes, and the instruction itself is cut from the audio (chosen by Julien on 22 Nov 2026), under the same "no other speech, no film" condition.
+- Spoken markers: an explicit call to Claude at the start of a sentence ("dis Claude", or "Claude" followed by a comma or a pause; decided by Julien on 23 Nov 2026) followed by an instruction that holds an action word (rule changed by Julien on 22 Nov 2026 after the test recording, instead of fixed phrases) gives a `Requested cut` or `Clip to add` event in the Timecodes, and the instruction itself is cut from the audio (chosen by Julien on 22 Nov 2026), under the same "no other speech, no film" condition.
 - Cuts are the same on every track: any cut (silence, "euh", marker) is blocked by speech on any other track.
 - `--dry-run` still writes no audio; the words cache (JSON) is allowed.
 - French text allowed in code and configuration only for speech to recognize: the marker trigger and action words, the filler words and the Whisper prompt.
@@ -220,8 +220,9 @@ def test_long_euh_is_flagged(): ...                       # 2.0 s → "Too long 
 - Consumes: `Word`, `normalize`, `word_cut_window`, `blocking_reason`, `OTHER_SPEECH` (task 4), `Event`, `EventType`, `Settings`, `rapidfuzz.fuzz.ratio`.
 - Produces: `@dataclass(frozen=True) class Marker: event: Event; cut: Interval | None`; `find_markers(words: list[Word], track: str, other_speech: list[Interval], film: list[Interval], levels: np.ndarray, settings: Settings) -> list[Marker]`, sorted by time.
   Rule (changed by Julien on 22 Nov 2026 after the test recording, where he gives spoken instructions rather than fixed phrases; the first version matched `marker_cut_phrase` / `marker_clip_phrase` with fuzzy scores):
-  - Trigger: a word whose first token (`normalize`) has `fuzz.ratio(token, marker_trigger) >= marker_min_score`, at a sentence start: the track's first word, or the previous word ends with `.`, `?`, `!` or `…`, or the gap since the previous word is ≥ `marker_pause_s`, or the previous token is "dis" (then "dis" joins the instruction).
-  - The instruction runs from there to the first word that ends a sentence or is followed by a gap ≥ `marker_pause_s`, at most `marker_max_s` long.
+  - Trigger: a word whose first token (`normalize`) has `fuzz.ratio(token, marker_trigger) >= marker_min_score`. A word is at a sentence start when it is the track's first word, or the previous word ends with `.`, `?`, `!` or `…`, or the gap since the previous word is ≥ `marker_pause_s`; a hesitation or punctuation alone before it is looked through ("Euh, dis Claude").
+  - Call (decided by Julien on 23 Nov 2026, so "Claude Chabrol a coupé…" or "je te le dis Claude, coupe" are not instructions): either the previous word is "dis" and "dis" is at a sentence start (then "dis" joins the instruction), or the trigger is at a sentence start and its word ends with `,` or is followed by a gap ≥ `marker_pause_s`.
+  - The instruction runs from there to the first word after the trigger that ends a sentence or is followed by a gap ≥ `marker_pause_s`. It is at most `marker_max_s` long, measured from its first word ("dis" when present); one cut short there is kept in the audio (`cut = None`, reason ends `"; instruction kept: no clear end"`).
   - It is a marker only if it holds an action word: the first token found in `marker_cut_words` gives `CUT_REQUEST`, in `marker_clip_words` gives `CLIP_TO_ADD`.
   - Event: `start`/`end` = first and last word of the instruction, `track`, reason `'Spoken instruction: "<words as transcribed>"'`. Cut: `word_cut_window` with `marker_pad_s`; blocked (`cut = None`, reason ends `"; instruction kept: <reason>"`) by `blocking_reason`, or, as `"Other speech at the same time"`, by another word of the same track inside the window or two of the instruction's words overlapping (mixed layout).
 
@@ -231,7 +232,9 @@ def test_long_euh_is_flagged(): ...                       # 2.0 s → "Too long 
 def test_dis_claude_ajoute_is_a_clip_to_add(): ...        # "Dis Claude, ici il faudrait qu'on ajoute un passage de son…" → CLIP_TO_ADD
 def test_dis_claude_on_va_couper_is_a_cut(): ...          # "dis Claude, on va couper ce passage-là, les dix dernières secondes." → CUT_REQUEST
 def test_dis_claude_supprimer_is_a_cut(): ...             # "dis Claude, est-ce que tu peux supprimer la phrase juste avant…" → CUT_REQUEST
-def test_spec_phrase_after_a_pause(): ...                 # pause, "Claude ici on veut couper" → CUT_REQUEST
+def test_spec_phrase_after_a_pause(): ...                 # pause, "Claude, ici on veut couper" → CUT_REQUEST
+def test_claude_as_a_first_name_is_ignored(): ...        # "…film. Claude Chabrol a coupé…", "Bon. Claude Lelouch, dans cet extrait…" → []
+def test_dis_mid_sentence_is_ignored(): ...              # "je te le dis Claude, coupe ça." → []
 def test_claude_mid_sentence_is_ignored(): ...            # "j'ai demandé à Claude de couper ça." → []
 def test_instruction_without_action_word_is_ignored(): ...  # "Bon. Claude, tu es là ?" → []
 def test_misheard_trigger_still_found(): ...              # "Cloude" (score 83) → found; "Clode" (73) → []
@@ -265,7 +268,7 @@ def test_mixed_layout_word_in_the_window_keeps_the_instruction(): ...
 ### Silences      214 silences shortened, 00:09:01.200 removed.
 ### Hesitations   153 hesitations removed (00:01:02.300), 12 flagged:
                   | Original | Final | Track | Context | Reason |   (flagged ones only)
-### Markers       3 spoken markers: 2 requested cuts, 1 clip to add; 3 phrases removed (00:00:05.100).
+### Markers       3 spoken markers: 2 requested cuts, 1 clip to add; 3 instructions removed (00:00:05.100).
 ### Overlaps      (unchanged)
 ### Transcription mlx-whisper large-v3-turbo · 00:58:40.000 of speech transcribed · 1 of 2 tracks from the cache.
 ### Claude's opinions (unchanged)
