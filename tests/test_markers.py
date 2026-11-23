@@ -89,6 +89,11 @@ def test_dis_mid_sentence_is_ignored():
     assert found == []
 
 
+def test_claude_after_a_sentence_ending_in_dis_is_a_call():
+    _, [m] = _find("je te le dis. Claude, coupe ça.")
+    assert _heard(m) == "Claude, coupe ça."
+
+
 def test_claude_mid_sentence_is_ignored():
     _, found = _find("j'ai demandé à Claude de couper ça.")
     assert found == []

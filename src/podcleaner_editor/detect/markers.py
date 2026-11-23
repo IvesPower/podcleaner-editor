@@ -74,8 +74,8 @@ def _start(words: list[Word], i: int, settings: Settings) -> int | None:
     if not tokens or fuzz.ratio(tokens[0], trigger) < settings.marker_min_score:
         return None
     previous = _tokens(words[i - 1]) if i > 0 else []
-    if previous == [_CALL_WORD]:
-        return i - 1 if _sentence_start(words, i - 1, settings) else None
+    if previous == [_CALL_WORD] and _sentence_start(words, i - 1, settings):
+        return i - 1
     if not _sentence_start(words, i, settings):
         return None
     called = words[i].text.strip().endswith(",") or _pause_after(words, i, settings.marker_pause_s)
