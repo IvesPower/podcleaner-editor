@@ -2,7 +2,7 @@
 
 [Français](spec.fr.md) · **English** — translated from the French original, which remains the reference.
 
-Nov 5, 2026 · @Julien — revised Nov 21, 2026 (stereo track with both voices, Claude through the built-in account, CLI interface)
+Nov 5, 2026 · @Julien — revised Nov 21, 2026 (stereo track with both voices, Claude through the built-in account, CLI interface), revised Nov 23, 2026 (voice markers: call to Claude and action verb)
 
 ## Context and goal
 
@@ -18,7 +18,7 @@ The tool runs on macOS and Windows and is published as open source on GitHub. It
 | Silences | Shortens to about 0.4 s every silence longer than 1 s where all tracks are quiet, with a fade | Silero VAD per track, ffmpeg | None |
 | Hesitations | Removes isolated "uh"s that don't break the sentence, flags the others | faster-whisper or mlx-whisper (word timestamps), track by track | Judging, sentence by sentence, whether a cut still sounds natural |
 | Overlapping speech | Spots a person trying to talk over the other without taking the floor; sets a timecode, the fix is done by hand. Only with one track per voice | Overlaps detected by VAD on each track | Discarding backchannels ("yes", "mmh") and laughs to flag only real attempts |
-| Voice markers | Spots "Claude ici on veut couper" ("Claude, cut here") and "Claude ici on veut ajouter un extrait" ("Claude, add a clip here") | Whisper + fuzzy search (rapidfuzz) | Recognising variations in wording |
+| Voice markers | Spots a call to Claude at the start of a sentence ("dis Claude, …" or "Claude, …") followed by an instruction that holds an action verb: couper, supprimer… ("cut", "delete") for a requested cut; ajouter, extrait… ("add", "clip") for a clip to add. The instruction is removed from the audio | Whisper + rules on words (rapidfuzz for the trigger) | Recognising variations in wording |
 | Film clips | Spots each clip played, from activity on the film track | Activity detection on the dedicated track | None |
 | Cut suggestions | Proposes passages to remove, with the reason | None | Reading the transcript, guided by examples from already-edited episodes |
 

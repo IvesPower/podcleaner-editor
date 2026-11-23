@@ -1,8 +1,11 @@
 from datetime import date
 from pathlib import Path
 
+from podcleaner_editor.analysis.transcribe import TranscriptionInfo
+from podcleaner_editor.analysis.words import Word
 from podcleaner_editor.audio_io import AudioInfo
 from podcleaner_editor.cutmap import CutMap
+from podcleaner_editor.detect.fillers import Filler
 from podcleaner_editor.episode import Episode, Track
 from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.report.markdown import AnalysisResult, render_edit_file
@@ -73,14 +76,28 @@ def test_pipe_in_reason_is_escaped():
 
 def test_report_counts_silences():
     text = _render(cuts=[I(10, 12), I(20, 25.5)])
+    assert "### Silences\n\n2 silences shortened, 00:00:07.500 removed.\n" in text
     assert (
-        "### Silences\n\n2 silences shortened, 00:00:07.500 removed. "
-        "Final duration: 00:01:07.250 (original: 00:01:14.750).\n"
+        "### Duration\n\nFinal duration: 00:01:07.250 (original: 00:01:14.750), "
+        "00:00:07.500 removed.\n"
     ) in text
 
 
 def test_one_silence_is_singular():
     assert "1 silence shortened, 00:00:02.000 removed." in _render(cuts=[I(10, 12)])
+
+
+def test_split_silence_counts_once():
+    result = AnalysisResult(
+        SEPARATE, [], CutMap((I(10, 12), I(12.5, 13))), True, silences_shortened=1
+    )
+    text = render_edit_file(result, "0.1.0", DAY)
+    assert "1 silence shortened, 00:00:02.500 removed." in text
+
+
+def test_cuts_computed_once():
+    result = AnalysisResult(SEPARATE, [], CutMap((I(10, 12),)), True)
+    assert result.cuts is result.cuts
 
 
 def test_separate_layout_counts_overlaps():
@@ -100,3 +117,90 @@ def test_claude_section_without_claude():
 
 def test_edit_mode():
     assert "· mode: edit ·" in _render(dry_run=False)
+
+
+INFO = TranscriptionInfo("mlx-whisper large-v3-turbo", 3520.0, 1)
+
+
+def _filler(start: float, cut: I | None, reason: str = "kept") -> Filler:
+    return Filler(Word("euh", start, start + 0.4), "Julien", "a | euh b", cut, reason)
+
+
+def _render_full(fillers=(), marker_cuts=(), events=(), cuts=(), transcription=INFO) -> str:
+    result = AnalysisResult(
+        SEPARATE,
+        list(events),
+        CutMap(tuple(cuts)),
+        True,
+        fillers=tuple(fillers),
+        marker_cuts=tuple(marker_cuts),
+        transcription=transcription,
+    )
+    return render_edit_file(result, "0.1.0", DAY)
+
+
+def test_final_column_counts_filler_and_marker_cuts():
+    event = Event(EventType.OVERLAP, 30.0, 31.0, "Franck", "x")
+    text = _render_full(
+        fillers=[_filler(20.0, I(20.0, 20.5))],
+        marker_cuts=[I(25.0, 25.0)],
+        events=[event],
+        cuts=[I(10, 12)],
+    )
+    assert "| Overlap | Franck | 00:00:30.000 | 00:00:27.500 |" in text
+
+
+def test_hesitations_section_lists_flagged_only():
+    text = _render_full(
+        fillers=[
+            _filler(20.0, I(20.0, 20.5)),
+            _filler(40.0, None, "Franck speaks"),
+        ],
+        cuts=[I(10, 12)],
+    )
+    assert (
+        "### Hesitations\n\n1 hesitation removed (00:00:00.500), 1 flagged:\n\n"
+        "| Original | Final | Track | Context | Reason |\n| --- | --- | --- | --- | --- |\n"
+        "| 00:00:40.000 | 00:00:37.500 | Julien | a \\| euh b | Franck speaks |\n"
+    ) in text
+
+
+def test_hesitations_without_flagged_has_no_table():
+    text = _render_full(fillers=[_filler(20.0, I(20.0, 20.5))])
+    assert "### Hesitations\n\n1 hesitation removed (00:00:00.500), 0 flagged.\n" in text
+
+
+def test_markers_section_counts_by_type():
+    events = [
+        Event(EventType.CUT_REQUEST, 5.0, 6.0, "Julien", "x"),
+        Event(EventType.CUT_REQUEST, 15.0, 16.0, "Julien", "x"),
+        Event(EventType.CLIP_TO_ADD, 25.0, 26.0, "Julien", "x"),
+    ]
+    text = _render_full(events=events, marker_cuts=[I(5, 6), I(15, 16.1), I(25, 28)])
+    assert (
+        "### Markers\n\n3 spoken markers: 2 requested cuts, 1 clip to add; "
+        "3 instructions removed (00:00:05.100).\n"
+    ) in text
+    assert "No spoken markers." in _render_full()
+
+
+def test_transcription_section():
+    assert (
+        "### Transcription\n\nmlx-whisper large-v3-turbo · 00:58:40.000 of speech "
+        "transcribed · 1 of 2 tracks from the cache.\n"
+    ) in _render_full()
+
+
+def test_without_transcription_sections_say_not_available():
+    text = _render_full(transcription=None)
+    assert "### Hesitations\n\nNot available: the episode was not transcribed.\n" in text
+    assert "### Markers\n\nNot available: the episode was not transcribed.\n" in text
+    assert "### Transcription\n\nNone.\n" in text
+
+
+def test_duration_section():
+    text = _render_full(fillers=[_filler(20.0, I(20.0, 20.5))], cuts=[I(10, 12)])
+    assert (
+        "### Duration\n\nFinal duration: 00:01:12.250 (original: 00:01:14.750), "
+        "00:00:02.500 removed.\n"
+    ) in text

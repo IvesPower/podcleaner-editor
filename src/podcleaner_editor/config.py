@@ -9,6 +9,7 @@ from typing import Any, Literal, get_args
 
 from platformdirs import user_config_dir
 
+from podcleaner_editor.analysis.words import normalize
 from podcleaner_editor.errors import EditorError
 
 APP_NAME = "podcleaner-editor"
@@ -36,6 +37,33 @@ class Settings:
     film_threshold_dbfs: float = -45.0
     film_merge_gap_s: float = 2.0
     film_min_clip_s: float = 3.0
+    whisper_model: str = "large-v3-turbo"
+    transcription_language: str = "fr"
+    # French on purpose: Whisper copies the style of this text, so it writes the hesitations.
+    transcription_prompt: str = "Euh, alors, euh… bon, hum, voilà."
+    passage_gap_s: float = 1.0
+    passage_pad_s: float = 0.2
+    filler_words: tuple[str, ...] = ("euh", "heu", "euhm", "hum", "hm")
+    filler_pad_s: float = 0.05
+    filler_max_s: float = 1.5
+    filler_snap_s: float = 0.08
+    # Spoken instructions: French on purpose, they are words to recognize.
+    marker_trigger: str = "claude"
+    marker_cut_words: tuple[str, ...] = (
+        "couper",
+        "coupe",
+        "supprimer",
+        "supprime",
+        "enlever",
+        "enleve",
+        "retirer",
+        "retire",
+    )
+    marker_clip_words: tuple[str, ...] = ("ajouter", "ajoute", "extrait", "inserer", "insere")
+    marker_min_score: float = 80.0
+    marker_pause_s: float = 0.5
+    marker_max_s: float = 15.0
+    marker_pad_s: float = 0.1
     # Overlap values tuned on the test recording (samples/pedit): the rule flags widely,
     # Claude (M5) is the one that sets backchannels aside.
     overlap_min_s: float = 0.15
@@ -77,6 +105,52 @@ _KEYS: dict[tuple[str, str], tuple[str, str]] = {
     ("film", "threshold_dbfs"): ("film_threshold_dbfs", "Film track level that counts as playing."),
     ("film", "merge_gap_s"): ("film_merge_gap_s", "Pauses shorter than this stay in one clip."),
     ("film", "min_clip_s"): ("film_min_clip_s", "Shortest film clip reported (seconds)."),
+    ("transcription", "model"): (
+        "whisper_model",
+        "Whisper model (mlx-community name on Apple silicon).",
+    ),
+    ("transcription", "language"): ("transcription_language", "Language spoken in the episode."),
+    ("transcription", "prompt"): (
+        "transcription_prompt",
+        "Example text that makes Whisper write the hesitations.",
+    ),
+    ("transcription", "passage_gap_s"): (
+        "passage_gap_s",
+        "Speech closer than this is transcribed in one passage (seconds).",
+    ),
+    ("transcription", "passage_pad_s"): (
+        "passage_pad_s",
+        "Margin added around each passage (seconds).",
+    ),
+    ("hesitations", "words"): ("filler_words", "Words counted as hesitations."),
+    ("hesitations", "pad_s"): ("filler_pad_s", "Margin cut around a hesitation (seconds)."),
+    ("hesitations", "max_s"): (
+        "filler_max_s",
+        "Longer hesitations are flagged, not cut (seconds).",
+    ),
+    ("hesitations", "snap_s"): (
+        "filler_snap_s",
+        "How far a cut edge may move to the quietest point (seconds).",
+    ),
+    ("markers", "trigger"): (
+        "marker_trigger",
+        "Word that opens a spoken instruction, at the start of a sentence.",
+    ),
+    ("markers", "cut_words"): ("marker_cut_words", "Words that make an instruction a cut."),
+    ("markers", "clip_words"): (
+        "marker_clip_words",
+        "Words that make an instruction a clip to add.",
+    ),
+    ("markers", "min_score"): (
+        "marker_min_score",
+        "Lowest similarity (0 to 100) for a heard word to count as the trigger.",
+    ),
+    ("markers", "pause_s"): (
+        "marker_pause_s",
+        "A pause this long starts or ends an instruction (seconds).",
+    ),
+    ("markers", "max_s"): ("marker_max_s", "Longest instruction (seconds)."),
+    ("markers", "pad_s"): ("marker_pad_s", "Margin cut around an instruction (seconds)."),
     ("overlaps", "min_s"): ("overlap_min_s", "Shortest talk-over flagged (seconds)."),
     ("overlaps", "floor_hold_s"): (
         "overlap_floor_hold_s",
@@ -128,8 +202,22 @@ def load_settings(path: Path) -> Settings:
             if (section, key) not in _KEYS:
                 raise EditorError(f"{path}: unknown setting [{section}] {key}")
             name = _KEYS[(section, key)][0]
-            values[name] = _convert(name, raw, f"{path}: [{section}] {key}")
+            label = f"{path}: [{section}] {key}"
+            values[name] = _convert(name, raw, label)
+            if name in _SINGLE_WORDS:
+                _check_single_words(values[name], label)
     return Settings(**values)
+
+
+# Matched against one transcribed word at a time.
+_SINGLE_WORDS = ("marker_trigger", "marker_cut_words", "marker_clip_words")
+
+
+def _check_single_words(value: str | tuple[str, ...], label: str) -> None:
+    words = (value,) if isinstance(value, str) else value
+    if any(len(normalize(w).split()) != 1 for w in words):
+        many = "single words" if isinstance(value, tuple) else "a single word"
+        raise EditorError(f"{label} must be {many}")
 
 
 def _convert(name: str, raw: Any, label: str) -> Any:
@@ -150,6 +238,14 @@ def _convert(name: str, raw: Any, label: str) -> Any:
         ):
             raise EditorError(f'{label} must list two names, such as ["Julien", "Marc"]')
         return (raw[0].strip(), raw[1].strip())
+    if isinstance(default, tuple):
+        if (
+            not isinstance(raw, list)
+            or not raw
+            or not all(isinstance(v, str) and v.strip() for v in raw)
+        ):
+            raise EditorError(f'{label} must list words, such as ["euh", "heu"]')
+        return tuple(v.strip() for v in raw)
     if isinstance(default, bool):
         if not isinstance(raw, bool):
             raise EditorError(f"{label} must be true or false")
