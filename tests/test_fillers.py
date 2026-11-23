@@ -55,6 +55,15 @@ def test_euh_overlapping_an_earlier_word_on_the_same_track_is_flagged():
     assert f.cut is None and f.reason == "Other speech at the same time"
 
 
+def test_mixed_layout_word_in_the_window_is_flagged():
+    # The other voice's "oui" sits inside "Alors", which ends inside the euh's padded window.
+    words = [Word("Alors", 10.0, 10.88), Word("oui", 10.1, 10.3), Word("euh", 10.9, 11.0)]
+    [f] = find_fillers(
+        {"Julien": words}, {"Julien": []}, [], {"Julien": np.full(2000, -60.0)}, SETTINGS
+    )
+    assert f.cut is None and f.reason == "Other speech at the same time"
+
+
 def test_euh_during_film_clip_is_flagged():
     [f] = _find(film=[I(5.1, 5.2)])
     assert f.cut is None and f.reason == "During a film clip"

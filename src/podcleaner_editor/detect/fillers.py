@@ -7,7 +7,13 @@ import numpy as np
 
 from podcleaner_editor.analysis.words import Word, normalize
 from podcleaner_editor.config import Settings
-from podcleaner_editor.detect.cuts import OTHER_SPEECH, blocking_reason, word_cut_window
+from podcleaner_editor.detect.cuts import (
+    OTHER_SPEECH,
+    blocking_reason,
+    latest_ends,
+    word_cut_window,
+    words_overlap,
+)
 from podcleaner_editor.timeline import Interval
 
 CUT_REASON = "Isolated hesitation"
@@ -56,6 +62,7 @@ def find_fillers(
     hop = settings.level_hop_s
     fillers: list[Filler] = []
     for track, track_words in words.items():
+        ends = latest_ends(track_words)
         for i, word in enumerate(track_words):
             if not is_filler(word.text, settings.filler_words):
                 continue
@@ -63,23 +70,21 @@ def find_fillers(
             nxt = track_words[i + 1] if i + 1 < len(track_words) else None
             context = _context(track_words, i)
             cut: Interval | None = None
+            window = word_cut_window(
+                word.span,
+                prev.end if prev else None,
+                nxt.start if nxt else None,
+                settings.filler_pad_s,
+                levels[track],
+                hop,
+                settings.filler_snap_s,
+            )
             if word.span.duration > settings.filler_max_s:
                 reason = TOO_LONG
-            elif any(
-                j != i and other.start < word.end and other.end > word.start
-                for j, other in enumerate(track_words)
-            ):
+            elif words_overlap(track_words, i, i, window, ends):
+                # Mixed layout: the other voice's words are on this track.
                 reason = OTHER_SPEECH
             else:
-                window = word_cut_window(
-                    word.span,
-                    prev.end if prev else None,
-                    nxt.start if nxt else None,
-                    settings.filler_pad_s,
-                    levels[track],
-                    hop,
-                    settings.filler_snap_s,
-                )
                 blocked = blocking_reason(window, other_speech.get(track, []), film)
                 if blocked is None:
                     cut, reason = window, CUT_REASON

@@ -1,9 +1,12 @@
 """Cut windows around a word, shared by the hesitation and spoken-marker detectors."""
 
 import math
+from bisect import bisect_right
+from itertools import accumulate
 
 import numpy as np
 
+from podcleaner_editor.analysis.words import Word
 from podcleaner_editor.timeline import Interval, intersect
 
 OTHER_SPEECH = "Other speech at the same time"
@@ -98,3 +101,26 @@ def word_cut_window(
     )
     window = cut_window(span, prev_end, next_start, pad)
     return snap_to_quiet(window, span, levels, hop_s, snap_s, bounds)
+
+
+def latest_ends(words: list[Word]) -> list[float]:
+    """For each word (sorted by start), the latest end among it and the words before it."""
+    return list(accumulate((w.end for w in words), max))
+
+
+def words_overlap(
+    words: list[Word], first: int, last: int, window: Interval, ends: list[float]
+) -> bool:
+    """A word outside `words[first:last + 1]` is heard in `window`, or two inside it overlap.
+
+    `words` are sorted by start and `ends` is their `latest_ends`.
+    """
+    inside = words[first : last + 1]
+    if any(a.end > b.start for a, b in zip(inside, inside[1:], strict=False)):
+        return True
+    k = bisect_right(ends, window.start)  # no word before k ends after the window starts
+    while k < len(words) and words[k].start < window.end:
+        if not first <= k <= last and words[k].end > window.start:
+            return True
+        k += 1
+    return False

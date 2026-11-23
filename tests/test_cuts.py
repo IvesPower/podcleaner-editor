@@ -1,6 +1,13 @@
 import numpy as np
 
-from podcleaner_editor.detect.cuts import blocking_reason, cut_window, snap_to_quiet
+from podcleaner_editor.analysis.words import Word
+from podcleaner_editor.detect.cuts import (
+    blocking_reason,
+    cut_window,
+    latest_ends,
+    snap_to_quiet,
+    words_overlap,
+)
 from podcleaner_editor.timeline import Interval as I
 
 HOP = 0.01
@@ -63,3 +70,11 @@ def test_blocking_reason_order():
     assert blocking_reason(w, [I(5.2, 5.3)], [I(5.0, 6.0)]) == "Other speech at the same time"
     assert blocking_reason(w, [], [I(5.0, 6.0)]) == "During a film clip"
     assert blocking_reason(w, [I(6.0, 7.0)], [I(7.0, 8.0)]) is None
+
+
+def test_words_overlap_finds_a_long_earlier_word():
+    words = [Word("long", 0.0, 5.2), Word("a", 1.0, 1.2), Word("b", 4.0, 4.5), Word("c", 5.0, 5.4)]
+    ends = latest_ends(words)
+    assert words_overlap(words, 3, 3, I(4.95, 5.45), ends)  # "long" ends inside the window
+    assert not words_overlap(words[1:], 2, 2, I(4.95, 5.45), latest_ends(words[1:]))
+    assert words_overlap(words, 1, 2, I(1.0, 4.5), ends)  # "long" spans the whole window

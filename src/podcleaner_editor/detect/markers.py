@@ -8,7 +8,13 @@ from rapidfuzz import fuzz
 
 from podcleaner_editor.analysis.words import Word, normalize
 from podcleaner_editor.config import Settings
-from podcleaner_editor.detect.cuts import OTHER_SPEECH, blocking_reason, word_cut_window
+from podcleaner_editor.detect.cuts import (
+    OTHER_SPEECH,
+    blocking_reason,
+    latest_ends,
+    word_cut_window,
+    words_overlap,
+)
 from podcleaner_editor.detect.fillers import is_filler
 from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.timeline import Interval
@@ -89,18 +95,6 @@ def _end(words: list[Word], first: int, trigger: int, settings: Settings) -> tup
     return last, True
 
 
-def _overlapped(words: list[Word], first: int, last: int, window: Interval) -> bool:
-    """Another word of the track is heard in the window, or two of the instruction's overlap."""
-    inside = words[first : last + 1]
-    if any(a.end > b.start for a, b in zip(inside, inside[1:], strict=False)):
-        return True
-    return any(
-        w.start < window.end and w.end > window.start
-        for k, w in enumerate(words)
-        if not first <= k <= last
-    )
-
-
 def _event_type(words: list[Word], settings: Settings) -> EventType | None:
     cut = {normalize(w) for w in settings.marker_cut_words}
     clip = {normalize(w) for w in settings.marker_clip_words}
@@ -123,6 +117,7 @@ def find_markers(
 ) -> list[Marker]:
     """Every instruction to Claude with an action word, cut unless something else is heard."""
     markers = []
+    ends = latest_ends(words)
     i = 0
     while i < len(words):
         first = _start(words, i, settings)
@@ -135,6 +130,7 @@ def find_markers(
             markers.append(
                 _marker(
                     words,
+                    ends,
                     first,
                     last,
                     clear_end,
@@ -152,6 +148,7 @@ def find_markers(
 
 def _marker(
     words: list[Word],
+    ends: list[float],
     first: int,
     last: int,
     clear_end: bool,
@@ -176,7 +173,7 @@ def _marker(
     )
     # Mixed layout: the other voice's words are on this track, around or inside the instruction.
     blocked = None if clear_end else NO_CLEAR_END
-    blocked = blocked or (OTHER_SPEECH if _overlapped(words, first, last, window) else None)
+    blocked = blocked or (OTHER_SPEECH if words_overlap(words, first, last, window, ends) else None)
     blocked = blocked or blocking_reason(window, other_speech, film)
     if blocked is not None:
         reason += f"; instruction kept: {blocked}"
