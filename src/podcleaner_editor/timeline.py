@@ -59,16 +59,17 @@ def subtract(a: list[Interval], b: list[Interval]) -> list[Interval]:
     """The moments of `a` not covered by `b`."""
     holes = merge(b)
     result: list[Interval] = []
+    first = 0  # the first hole that can still meet an interval: both lists are sorted
     for interval in merge(a):
+        while first < len(holes) and holes[first].end <= interval.start:
+            first += 1
         cursor = interval.start
-        for hole in holes:
-            if hole.end <= cursor:
-                continue
-            if hole.start >= interval.end:
-                break
-            if hole.start > cursor:
-                result.append(Interval(cursor, hole.start))
-            cursor = max(cursor, hole.end)
+        k = first
+        while k < len(holes) and holes[k].start < interval.end:
+            if holes[k].start > cursor:
+                result.append(Interval(cursor, holes[k].start))
+            cursor = max(cursor, holes[k].end)
+            k += 1
         if cursor < interval.end:
             result.append(Interval(cursor, interval.end))
     return result
