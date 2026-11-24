@@ -4,7 +4,7 @@ CLI Python qui fait le travail répétitif du montage d'un épisode de podcast :
 
 - Cahier des charges : `docs/spec.fr.md` (original, fait foi) · `docs/spec.md` (anglais)
 - Feuille de route : `docs/superpowers/plans/2026-11-05-roadmap.fr.md` (et `.md` en anglais)
-- Plan du jalon en cours : `docs/superpowers/plans/2026-11-05-m1-foundations-analysis.fr.md` (et `.md` en anglais)
+- Plan du jalon en cours : `docs/superpowers/plans/2026-11-24-m3-applied-edit.fr.md` (et `.md` en anglais), conception : `docs/superpowers/specs/2026-11-24-m3-applied-edit-design.fr.md`
 
 ## Commandes
 
