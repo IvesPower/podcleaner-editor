@@ -1,6 +1,7 @@
 import os
 import shutil
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -201,9 +202,50 @@ def test_large_file_becomes_rf64():
 
 def test_not_enough_space(tmp_path, monkeypatch):
     a = _wav(tmp_path / "a.wav", _ramp())
-    monkeypatch.setattr(shutil, "disk_usage", lambda path: shutil._ntuple_diskusage(100, 90, 10))
+    monkeypatch.setattr(
+        shutil, "disk_usage", lambda path: SimpleNamespace(total=100, used=90, free=10)
+    )
     tracks = [RenderTrack(a, tmp_path / "out" / "out.a.wav", None)]
     (tmp_path / "out").mkdir()
     with pytest.raises(EditorError, match="Not enough disk space"):
         write_edit(tracks, _plan([]), 1000, tmp_path / "out" / "out.mix.wav", _settings())
     assert os.listdir(tmp_path / "out") == []
+
+
+@pytest.mark.parametrize("fail_read", [True, False])
+def test_close_error_during_cleanup_still_deletes_tmp(tmp_path, monkeypatch, fail_read):
+    # fail_read: a read raises, then a close raises during cleanup (the read error wins).
+    # Otherwise: the first close of the success path raises, and cleanup still runs.
+    monkeypatch.setattr(writer, "_BLOCK_S", 0.1)
+    a = _wav(tmp_path / "a.wav", _ramp())
+    b = _wav(tmp_path / "b.wav", _ramp())
+    targets = [tmp_path / "out.a.wav", tmp_path / "out.b.wav", tmp_path / "out.mix.wav"]
+    for target in targets:
+        target.write_text("old", encoding="utf-8")
+    real_read, real_close = sf.SoundFile.read, sf.SoundFile.close
+    calls = {"read": 0, "close": 0}
+
+    def failing_read(self, *args, **kwargs):
+        calls["read"] += 1
+        if fail_read and calls["read"] == 2:
+            raise KeyboardInterrupt
+        return real_read(self, *args, **kwargs)
+
+    def failing_close(self):
+        # Only the outputs fail, and only once: `sf.info` also closes the sources.
+        first = not self.closed and str(self.name).endswith(".tmp") and calls["close"] == 0
+        real_close(self)
+        if first:
+            calls["close"] += 1
+            raise OSError("close failed")
+
+    monkeypatch.setattr(sf.SoundFile, "read", failing_read)
+    monkeypatch.setattr(sf.SoundFile, "close", failing_close)
+    tracks = [RenderTrack(a, targets[0], None), RenderTrack(b, targets[1], None)]
+    expected = KeyboardInterrupt if fail_read else OSError
+    with pytest.raises(expected):
+        write_edit(tracks, _plan([(0.4, 0.6)]), 1000, targets[2], _settings())
+    assert calls["close"] >= 1
+    assert list(tmp_path.glob("*.tmp")) == []
+    for target in targets:
+        assert target.read_text(encoding="utf-8") == "old"

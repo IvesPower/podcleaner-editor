@@ -1,5 +1,6 @@
 """Streaming the cut tracks and their stereo mix to disk, block by block."""
 
+import contextlib
 import os
 import shutil
 from dataclasses import dataclass
@@ -219,6 +220,17 @@ def _write_piece(
     return written
 
 
+def _discard(handles: list[sf.SoundFile | None], paths: list[Path]) -> None:
+    """Close every handle and delete every path, going on past any failure."""
+    for handle in handles:
+        if handle is not None:
+            with contextlib.suppress(Exception):
+                handle.close()
+    for path in paths:
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
+
+
 def write_edit(
     tracks: list[RenderTrack],
     pieces: list[Piece],
@@ -228,9 +240,10 @@ def write_edit(
 ) -> int:
     """Write every cut track and their stereo mix in one streamed pass; return `n_out`.
 
-    Each output is first written to `<target>.tmp`; the targets are replaced only once
-    every file is written and closed. On any error, or Ctrl+C, the `.tmp` files are
-    deleted and the existing targets are left as they were.
+    Each output is first written to `<target>.tmp`; the targets are replaced only at the
+    end, once every file is written and closed. An error, or Ctrl+C, before that deletes
+    the `.tmp` files and leaves the existing targets as they were. A failure while
+    renaming can leave some targets new and some old, but never a half-written file.
     """
     sources = [track.source for track in tracks]
     rate = check_renderable(sources)
@@ -261,19 +274,14 @@ def write_edit(
             track.close()
         mix.close()
     except BaseException:
-        for track in opened:
-            track.close()
-        if mix is not None:
-            mix.close()
-        for path in [_tmp_path(track.target) for track in tracks] + [mix_tmp]:
-            path.unlink(missing_ok=True)
+        handles = [h for t in opened for h in (t.reader, t.output)] + [mix]
+        _discard(handles, [_tmp_path(track.target) for track in tracks] + [mix_tmp])
         raise
     moves = [(track.tmp, track.target) for track in opened] + [(mix_tmp, mix_target)]
     try:
         for tmp, target in moves:
             os.replace(tmp, target)
     except BaseException:
-        for tmp, _ in moves:
-            tmp.unlink(missing_ok=True)
+        _discard([], [tmp for tmp, _ in moves])
         raise
     return n_out
