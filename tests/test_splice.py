@@ -51,6 +51,20 @@ def test_output_length_is_exact():
         assert p.fade_out <= (p.end - p.start) // 2
 
 
+def test_pieces_stay_within_the_audio_on_random_cuts():
+    rng = np.random.default_rng(11)
+    rate = 1000
+    for _ in range(200):
+        n_total = int(rng.integers(1, 3000))
+        points = np.sort(rng.uniform(-0.2, n_total / rate + 0.2, 2 * int(rng.integers(0, 12))))
+        cuts = [(float(points[i]), float(points[i + 1])) for i in range(0, len(points), 2)]
+        plan = _plan(cuts, n_total=n_total, rate=rate, fade_ms=int(rng.integers(0, 80)))
+        for p in plan:
+            assert 0 <= p.start - p.fade_in
+            assert p.end + p.fade_out <= n_total
+            assert p.fade_in + p.fade_out <= p.end - p.start
+
+
 def test_fade_curves_keep_power():
     fade_in, fade_out = fade_curves(15)
     assert fade_in.shape == fade_out.shape == (30,)

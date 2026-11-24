@@ -67,5 +67,16 @@ def test_gate_gain_on_a_block_matches_the_whole():
     assert np.array_equal(whole[1234:1734], block)
 
 
+@pytest.mark.parametrize("size", [1, 2, 3, 7, 10, 13, 37, 64, 99])
+def test_gate_gain_in_small_blocks_matches_the_whole(size):
+    # Small blocks put their edges inside the attack and release ramps.
+    passages = [I(0.1, 0.15), I(0.16, 0.2), I(0.33, 0.4)]
+    whole = gate_gain(passages, 0, 600, 1000, 0.01, 0.1)
+    blocks = [
+        gate_gain(passages, a, min(size, 600 - a), 1000, 0.01, 0.1) for a in range(0, 600, size)
+    ]
+    assert np.array_equal(np.concatenate(blocks), whole)
+
+
 def test_gate_gain_without_passages_is_silent():
     assert not gate_gain([], 0, 100, 1000, 0.01, 0.1).any()
