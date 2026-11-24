@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import date
 from functools import cached_property
+from pathlib import Path
 
 from podcleaner_editor.analysis.transcribe import TranscriptionInfo
 from podcleaner_editor.cutmap import CutMap
@@ -12,6 +13,8 @@ from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.timeline import Interval, format_tc, merge
 
 _LAYOUT_NAMES = {"separate": "separate tracks", "mixed": "mixed voices"}
+# A track this much longer than the episode or less is not said to be left out at the end.
+_LEFT_OUT_MIN_S = 0.001
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,10 @@ class AnalysisResult:
     transcription: TranscriptionInfo | None = None
     # Silences shortened, when a speech cut splits some of them; None: one per silence cut.
     silences_shortened: int | None = None
+    # Open passages of each voice's gate, by label; None: the gate is off.
+    gates: dict[str, tuple[Interval, ...]] | None = None
+    # The files written besides the edit file (filled in by `run`).
+    outputs: tuple[Path, ...] = ()
 
     @cached_property
     def cuts(self) -> CutMap:
@@ -65,17 +72,19 @@ def _timecodes(result: AnalysisResult) -> list[str]:
 
 def _tracks(episode: Episode) -> list[str]:
     lines = [
-        "| Track | File | Duration | Sample rate | Channels |",
-        "| --- | --- | --- | --- | --- |",
+        "| Track | File | Duration | Sample rate | Channels | Left out at the end |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for track in episode.tracks:
         info = track.info
+        extra = info.duration - episode.duration
         cells = [
             _cell(track.label),
             _cell(info.path.name),
             format_tc(info.duration),
             f"{info.sample_rate} Hz",
             str(info.channels),
+            format_tc(extra) if extra > _LEFT_OUT_MIN_S else "—",
         ]
         lines.append("| " + " | ".join(cells) + " |")
     return lines
@@ -88,6 +97,12 @@ def _duration(result: AnalysisResult) -> str:
         f"Final duration: {format_tc(cuts.final_duration(total))} "
         f"(original: {format_tc(total)}), {format_tc(cuts.removed())} removed."
     )
+
+
+def _files(result: AnalysisResult) -> list[str]:
+    if result.dry_run:
+        return ["None: dry run, no audio written."]
+    return [f"- {path.name}" for path in result.outputs]
 
 
 def _silences(result: AnalysisResult) -> str:
@@ -178,6 +193,10 @@ def render_edit_file(result: AnalysisResult, version: str, generated_on: date) -
         "### Duration",
         "",
         _duration(result),
+        "",
+        "### Files",
+        "",
+        *_files(result),
         "",
         "### Tracks",
         "",

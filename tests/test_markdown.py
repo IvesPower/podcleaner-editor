@@ -58,9 +58,33 @@ def test_render_matches_expected_snippet():
 
 def test_tracks_table():
     text = _render()
-    assert "### Tracks\n\n| Track | File | Duration | Sample rate | Channels |\n" in text
-    assert "| Julien | julien.wav | 00:01:14.750 | 44100 Hz | 1 |" in text
-    assert "| Film | film.wav | 00:01:14.750 | 44100 Hz | 2 |" in text
+    header = "| Track | File | Duration | Sample rate | Channels | Left out at the end |"
+    assert f"### Tracks\n\n{header}\n" in text
+    assert "| Julien | julien.wav | 00:01:14.750 | 44100 Hz | 1 | — |" in text
+    assert "| Film | film.wav | 00:01:14.750 | 44100 Hz | 2 | — |" in text
+
+
+def test_tracks_section_reports_left_out_end():
+    film = Track("Film", AudioInfo(Path("film.wav"), 76.25, 44100, 2, "pcm_f32le", "wav"))
+    voice = Track("Franck", AudioInfo(Path("franck.wav"), 74.7504, 44100, 1, "pcm_f32le", "wav"))
+    episode = Episode("Episode 42", (SEPARATE.voices[0], voice), film)
+    text = _render(episode=episode)
+    assert "| Film | film.wav | 00:01:16.250 | 44100 Hz | 2 | 00:00:01.500 |" in text
+    assert "| Julien | julien.wav | 00:01:14.750 | 44100 Hz | 1 | — |" in text
+    assert "| Franck | franck.wav | 00:01:14.750 | 44100 Hz | 1 | — |" in text  # 0.4 ms
+
+
+def test_files_section_lists_the_outputs():
+    outputs = (Path("/out/ep.julien.wav"), Path("/out/ep.mix.wav"))
+    result = AnalysisResult(SEPARATE, [], CutMap(()), False, outputs=outputs)
+    text = render_edit_file(result, "0.1.0", DAY)
+    duration_end = text.index("### Files")
+    assert text.index("### Duration") < duration_end < text.index("### Tracks")
+    assert "### Files\n\n- ep.julien.wav\n- ep.mix.wav\n\n### Tracks" in text
+
+
+def test_files_section_in_a_dry_run():
+    assert "### Files\n\nNone: dry run, no audio written.\n\n### Tracks" in _render()
 
 
 def test_empty_events_line():

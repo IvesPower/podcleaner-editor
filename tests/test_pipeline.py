@@ -13,10 +13,13 @@ from podcleaner_editor.analysis.words import Word
 from podcleaner_editor.audio_io import ANALYSIS_RATE, decode_mono_16k
 from podcleaner_editor.cli import app
 from podcleaner_editor.config import Settings
+from podcleaner_editor.cutmap import CutMap
 from podcleaner_editor.detect.cuts import OTHER_SPEECH
 from podcleaner_editor.episode import load_episode
 from podcleaner_editor.errors import EditorError
-from podcleaner_editor.events import EventType
+from podcleaner_editor.events import Event, EventType
+from podcleaner_editor.render.markers import Marker, read_wav_markers
+from podcleaner_editor.report.markdown import AnalysisResult
 from podcleaner_editor.timeline import Interval as I
 
 SETTINGS = replace(Settings(), speakers=("Julien", "Franck"))
@@ -348,7 +351,9 @@ def test_run_writes_the_words_cache(episode_files, tmp_path, monkeypatch):
     a, b, film = episode_files
     monkeypatch.setattr(pipeline, "speech_intervals", lambda s, st: [I(0, 20)])
     out = tmp_path / "Episode 7"
-    path = pipeline.run(load_episode([a, b], film, "Episode 7", SETTINGS), SETTINGS, out)
+    path = pipeline.run(
+        load_episode([a, b], film, "Episode 7", SETTINGS), SETTINGS, out, dry_run=True
+    )[0]
     assert (out / "Episode 7.words.json").is_file()
     assert "### Transcription" in path.read_text(encoding="utf-8")
 
@@ -360,7 +365,7 @@ def test_run_reports_an_unwritable_output_folder(episode_files, tmp_path, monkey
     out.write_text("a file, not a folder", encoding="utf-8")
     episode = load_episode([a, b], film, "ep", SETTINGS)
     with pytest.raises(EditorError, match=re.escape(f"Could not write to {out}: ")):
-        pipeline.run(episode, SETTINGS, out)
+        pipeline.run(episode, SETTINGS, out, dry_run=True)
 
 
 def test_run_reports_an_unwritable_words_cache(episode_files, tmp_path, monkeypatch):
@@ -374,7 +379,7 @@ def test_run_reports_an_unwritable_words_cache(episode_files, tmp_path, monkeypa
     out = tmp_path / "out"
     episode = load_episode([a, b], film, "ep", SETTINGS)
     with pytest.raises(EditorError, match=re.escape(f"Could not write to {out}: read-only")):
-        pipeline.run(episode, SETTINGS, out)
+        pipeline.run(episode, SETTINGS, out, dry_run=True)
 
 
 def _cli(*args):
@@ -423,13 +428,6 @@ def test_cli_warns_when_files_disagree_with_layout(episode_files, tmp_path, monk
     assert "⚠" in result.output and "mixed" in result.output
 
 
-def test_cli_without_dry_run_exits_2(episode_files, tmp_path):
-    a, b, film = episode_files
-    result = _cli("--voice", a, "--voice", b, "--film", film, "--out", tmp_path / "ep")
-    assert isinstance(result.exception, EditorError)  # main() turns it into exit code 2
-    assert "--dry-run" in str(result.exception)
-
-
 def test_cli_needs_out_or_output_dir(episode_files):
     a, b, film = episode_files
     result = _cli("--voice", a, "--voice", b, "--film", film, "--name", "ep", "--dry-run")
@@ -443,6 +441,214 @@ def test_cli_needs_a_name_without_out(episode_files):
     result = _cli("--voice", a, "--voice", b, "--film", film, "--dry-run")
     assert isinstance(result.exception, EditorError)  # main() turns it into exit code 2
     assert "--name" in str(result.exception)
+
+
+RATE = 8000
+
+
+def _voice(path: Path, seconds: float, spans=(), amp: float = 0.5, sr: int = RATE) -> Path:
+    """A voice track: a 440 Hz tone of amplitude `amp` in each span (all of it if none)."""
+    t = np.arange(int(round(seconds * sr))) / sr
+    on = np.zeros(len(t), dtype=bool) if spans else np.ones(len(t), dtype=bool)
+    for start, end in spans:
+        on |= (t >= start) & (t < end)
+    sf.write(path, np.where(on, amp * np.sin(2 * np.pi * 440 * t), 0.0), sr, subtype="PCM_16")
+    return path
+
+
+def _capture(monkeypatch) -> list:
+    """The results of `analyze` during a run, in order."""
+    results = []
+    analyze = pipeline.analyze
+
+    def capturing(*args, **kwargs):
+        results.append(analyze(*args, **kwargs))
+        return results[-1]
+
+    monkeypatch.setattr(pipeline, "analyze", capturing)
+    return results
+
+
+def _midi_markers(path: Path) -> list[tuple[float, str]]:
+    """(time in seconds, name) of each marker meta event of a type 0 MIDI file."""
+    track = path.read_bytes()[22:]
+    pos, tick, found = 7, 0, []  # after the tempo event
+    while pos < len(track) - 4:
+        delta = 0
+        while True:
+            byte = track[pos]
+            pos += 1
+            delta = (delta << 7) | (byte & 0x7F)
+            if not byte & 0x80:
+                break
+        tick += delta
+        assert track[pos : pos + 2] == b"\xff\x06"
+        size = track[pos + 2]  # names are shorter than 128 bytes here
+        found.append((tick / 1920, track[pos + 3 : pos + 3 + size].decode("utf-8")))
+        pos += 3 + size
+    return found
+
+
+@pytest.fixture
+def edit_files(tmp_path):
+    """Voices of 30 s and 31 s and a film of 30 s at 8 kHz, each sounding once."""
+    a = _voice(tmp_path / "julien.wav", 30, [(2, 8)])
+    b = _voice(tmp_path / "franck.wav", 31, [(12, 16)])
+    film = _film(tmp_path / "film.wav", 30, (20, 24), sr=RATE)
+    return a, b, film
+
+
+def test_run_writes_every_output(edit_files, tmp_path, monkeypatch):
+    a, b, film = edit_files
+    monkeypatch.setattr(pipeline, "speech_intervals", _fake_vad({30: [I(2, 8)], 31: [I(12, 16)]}))
+    results = _capture(monkeypatch)
+    out = tmp_path / "out"
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    paths = pipeline.run(episode, SETTINGS, out, dry_run=False)
+
+    names = ["ep.julien.wav", "ep.franck.wav", "ep.film.wav", "ep.mix.wav", "ep.markers.mid"]
+    assert paths == [out / "ep.edit.md", *(out / n for n in names)]
+    assert all(p.is_file() for p in paths)
+    assert not list(out.glob("*.tmp"))
+    [result] = results
+    cuts = result.cuts
+    assert len(cuts.cuts) >= 3
+    frames = {sf.info(out / n).frames for n in names[:4]}
+    assert len(frames) == 1
+    expected = round(cuts.final_duration(episode.duration) * RATE)
+    assert abs(frames.pop() - expected) <= len(cuts.cuts)
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert "· mode: edit ·" in text
+    assert "### Files\n\n" + "".join(f"- {n}\n" for n in names) in text
+
+
+def test_markers_match_events_and_flagged_fillers(tmp_path, monkeypatch):
+    voices = _voice(tmp_path / "julien.wav", 50)
+    film = _film(tmp_path / "film.wav", 50, (0, 0), sr=RATE)
+    words = [
+        *_words(("bonjour", 16.0, 16.5)),
+        *MARKER_AT_20,
+        *_words(("alors", 29.0, 29.5), ("euh", 30.0, 30.4), ("oui", 30.2, 30.6)),
+        *_words(("bon", 31.0, 31.4)),
+    ]
+    fake = _FakeTranscriber({"julien": words})
+    monkeypatch.setattr(pipeline, "make_transcriber", lambda settings: fake)
+    monkeypatch.setattr(pipeline, "decode_mono_16k", fake.decode)
+    monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, settings: [I(15, 45)])
+    settings = replace(SETTINGS, passage_gap_s=20.0)
+    out = tmp_path / "out"
+    pipeline.run(load_episode([voices], film, "ep", settings), settings, out, dry_run=False)
+
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    [request] = [r for r in _table_rows(text, "## Timecodes") if r[1] == "Requested cut"]
+    [flagged] = _table_rows(text, "### Hesitations")
+    expected = [
+        (_seconds(request[4]), f"Requested cut: {request[6]}"),
+        (_seconds(flagged[1]), f"Hesitation: Julien + Franck: {OTHER_SPEECH}"),
+    ]
+    midi = _midi_markers(out / "ep.markers.mid")
+    wav = [(pos / RATE, name) for pos, name in read_wav_markers(out / "ep.mix.wav")]
+    for found in (midi, wav):
+        assert [name for _, name in found] == [name for _, name in expected]
+        for (time, _), (want, _) in zip(found, expected, strict=True):
+            assert time == pytest.approx(want, abs=0.001)
+
+
+def test_markers_of_never_go_below_zero(edit_files):
+    a, b, film = edit_files
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    late = Event(EventType.OVERLAP, 3.0, 4.0, "Franck", "Reason")
+    early = Event(EventType.OVERLAP, -0.01, 1.0, "Franck", "Early")
+    result = AnalysisResult(episode, [late, early], CutMap((I(1.0, 2.0),)), True)
+    assert pipeline.markers_of(result) == [
+        Marker(0.0, "Overlap: Early"),
+        Marker(2.0, "Overlap: Reason"),
+    ]
+
+
+def test_gate_follows_settings(tmp_path, monkeypatch):
+    # A quiet voice, below the gate's -30 dB: the gate shuts it when it is on.
+    a = _voice(tmp_path / "julien.wav", 10, amp=0.01)
+    b = _voice(tmp_path / "franck.wav", 10, amp=0.01)
+    film = _film(tmp_path / "film.wav", 10, (0, 0), sr=RATE)
+    monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, settings: [I(0, 10)])
+    results = _capture(monkeypatch)
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+
+    pipeline.run(episode, SETTINGS, tmp_path / "on", dry_run=False)
+    assert results[-1].gates == {"Julien": (), "Franck": ()}
+    assert not np.any(sf.read(tmp_path / "on" / "ep.julien.wav")[0])
+
+    off = replace(SETTINGS, gate_enabled=False)
+    pipeline.run(episode, off, tmp_path / "off", dry_run=False)
+    assert results[-1].gates is None
+    for name in ("julien", "franck"):
+        data, _ = sf.read(tmp_path / "off" / f"ep.{name}.wav")
+        assert np.max(np.abs(data)) == pytest.approx(0.01, abs=1e-3)
+
+
+def test_analyze_gates_use_the_other_voice_when_separate(edit_files):
+    a, b, film = edit_files
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    result = pipeline.analyze(episode, SETTINGS, vad=lambda s, st: [])
+    assert _pairs(result.gates["Julien"]) == [(2, 8)]
+    assert _pairs(result.gates["Franck"]) == [(12, 16)]
+
+
+def test_mixed_layout_outputs(edit_files, tmp_path, monkeypatch):
+    a, _, film = edit_files
+    monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, settings: [I(2, 8)])
+    settings = replace(SETTINGS, speakers=("A", "B"))
+    out = tmp_path / "out"
+    paths = pipeline.run(load_episode([a], film, "ep", settings), settings, out, dry_run=False)
+    names = ["ep.edit.md", "ep.a-b.wav", "ep.film.wav", "ep.mix.wav", "ep.markers.mid"]
+    assert [p.name for p in paths] == names
+    assert sorted(p.name for p in out.iterdir()) == sorted([*names, "ep.words.json"])
+
+
+def test_dry_run_writes_no_audio(edit_files, tmp_path, monkeypatch):
+    a, b, film = edit_files
+    monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, settings: [I(2, 8)])
+    out = tmp_path / "out"
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    assert pipeline.run(episode, SETTINGS, out, dry_run=True) == [out / "ep.edit.md"]
+    assert sorted(p.name for p in out.iterdir()) == ["ep.edit.md", "ep.words.json"]
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert "· mode: dry run ·" in text
+    assert "### Files\n\nNone: dry run, no audio written.\n" in text
+
+
+def test_run_checks_the_tracks_before_the_analysis(tmp_path, monkeypatch):
+    a = _voice(tmp_path / "julien.wav", 10)
+    b = _voice(tmp_path / "franck.wav", 10, sr=16000)
+    film = _film(tmp_path / "film.wav", 10, (0, 0), sr=RATE)
+
+    def no_analysis(*args, **kwargs):
+        raise AssertionError("the tracks should have been checked first")
+
+    monkeypatch.setattr(pipeline, "analyze", no_analysis)
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    with pytest.raises(EditorError, match="sample rate"):
+        pipeline.run(episode, SETTINGS, tmp_path / "out", dry_run=False)
+
+
+@pytest.mark.parametrize(
+    ("label", "slug"),
+    [
+        ("Julien + Franck", "julien-franck"),
+        ("Élodie", "elodie"),
+        ("  --Voice B--  ", "voice-b"),
+        ("", "voice"),
+        ("!!", "voice"),
+    ],
+)
+def test_file_slug(label, slug):
+    assert pipeline.file_slug(label) == slug
+
+
+def test_voice_slugs_number_duplicates():
+    assert pipeline.voice_slugs(["Élodie", "elodie"]) == ["elodie-1", "elodie-2"]
+    assert pipeline.voice_slugs(["Julien", "Franck"]) == ["julien", "franck"]
 
 
 JULIEN_WAV = SAMPLES / "pedit-full-piste-1-julien.wav"

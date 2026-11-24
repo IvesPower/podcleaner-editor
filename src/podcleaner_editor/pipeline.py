@@ -1,15 +1,20 @@
 """The analysis of an episode, from the tracks to the edit file."""
 
-from collections.abc import Callable
+import re
+import unicodedata
+from collections import Counter
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 import numpy as np
+import soundfile as sf
 
 from podcleaner_editor import __version__
 from podcleaner_editor.analysis.activity import loud_intervals, noise_floor_db, own_speech
 from podcleaner_editor.analysis.film import film_activity, film_clips
+from podcleaner_editor.analysis.gate import gate_open
 from podcleaner_editor.analysis.transcribe import (
     Transcriber,
     TranscriptionInfo,
@@ -29,6 +34,9 @@ from podcleaner_editor.detect.silences import find_silence_cuts
 from podcleaner_editor.episode import Episode
 from podcleaner_editor.errors import EditorError
 from podcleaner_editor.events import Event, EventType
+from podcleaner_editor.render.markers import Marker, add_wav_markers, marker_name, write_midi
+from podcleaner_editor.render.splice import splice_plan
+from podcleaner_editor.render.writer import RenderTrack, check_renderable, write_edit
 from podcleaner_editor.report.markdown import AnalysisResult, render_edit_file
 from podcleaner_editor.timeline import Interval, subtract, union
 
@@ -218,6 +226,16 @@ def analyze(
     cuts = find_silence_cuts([*activities, film_on], episode.duration, settings)
     silence_cuts, shortened = _silence_pieces(cuts, speech_cuts, hop)
 
+    gates = None
+    if settings.gate_enabled:
+        separate = episode.layout == "separate"
+        gates = {
+            track.label: tuple(
+                gate_open(voice_levels[i], voice_levels[1 - i] if separate else None, hop, settings)
+            )
+            for i, track in enumerate(episode.voices)
+        }
+
     return AnalysisResult(
         episode=episode,
         events=sorted(events, key=lambda e: (e.start, e.end)),
@@ -227,7 +245,86 @@ def analyze(
         fillers=tuple(fillers),
         marker_cuts=tuple(sorted(marker_cuts)),
         transcription=transcription,
+        gates=gates,
     )
+
+
+def markers_of(result: AnalysisResult) -> list[Marker]:
+    """A marker for each event and each flagged hesitation, at its time on the final audio."""
+    cuts = result.cuts
+    markers = [
+        Marker(max(0.0, cuts.to_final(e.start)), marker_name(str(e.type), e.reason))
+        for e in result.events
+    ]
+    markers += [
+        Marker(
+            max(0.0, cuts.to_final(f.word.start)),
+            marker_name("Hesitation", f"{f.track}: {f.reason}"),
+        )
+        for f in result.fillers
+        if f.cut is None
+    ]
+    return sorted(markers, key=lambda m: m.time_s)
+
+
+def file_slug(label: str) -> str:
+    """`label` as a file name part: lowercase ASCII letters and digits joined by `-`."""
+    ascii_text = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
+    return slug or "voice"
+
+
+def voice_slugs(labels: Sequence[str]) -> list[str]:
+    """The slug of each label, numbered `-1`, `-2`… when several labels give the same one."""
+    slugs = [file_slug(label) for label in labels]
+    counts = Counter(slugs)
+    seen: Counter[str] = Counter()
+    numbered = []
+    for slug in slugs:
+        if counts[slug] > 1:
+            seen[slug] += 1
+            slug = f"{slug}-{seen[slug]}"
+        numbered.append(slug)
+    return numbered
+
+
+def _render(
+    result: AnalysisResult,
+    settings: Settings,
+    out_dir: Path,
+    rate: int,
+    progress: Callable[[str], None],
+) -> list[Path]:
+    """Write the edited tracks, their mix and the markers; return the files written."""
+    episode = result.episode
+    name = episode.name
+    gates = result.gates
+    tracks = [
+        RenderTrack(
+            track.info.path,
+            out_dir / f"{name}.{slug}.wav",
+            gates[track.label] if gates is not None else None,
+        )
+        for track, slug in zip(
+            episode.voices, voice_slugs([t.label for t in episode.voices]), strict=True
+        )
+    ]
+    tracks.append(RenderTrack(episode.film.info.path, out_dir / f"{name}.film.wav", None))
+    mix = out_dir / f"{name}.mix.wav"
+    midi = out_dir / f"{name}.markers.mid"
+
+    n_total = round(episode.duration * rate)
+    pieces = splice_plan(result.cuts, n_total, rate, settings.fade_ms)
+    markers = markers_of(result)
+    progress("Writing the edited tracks…")
+    try:
+        write_edit(tracks, pieces, n_total, mix, settings)
+        if not add_wav_markers(mix, markers, rate):
+            progress(f"⚠ The mix is over 4 GB (RF64): its markers are only in {midi.name}.")
+        write_midi(markers, midi)
+    except (OSError, sf.SoundFileError) as exc:
+        raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
+    return [*(t.target for t in tracks), mix, midi]
 
 
 def run(
@@ -235,18 +332,27 @@ def run(
     settings: Settings,
     out_dir: Path,
     *,
+    dry_run: bool,
     progress: Callable[[str], None] = lambda _: None,
-) -> Path:
-    """Analyses the episode and writes `<out_dir>/<name>.edit.md`; returns its path."""
+) -> list[Path]:
+    """Analyses the episode and writes `<out_dir>/<name>.edit.md`, and without `dry_run` the
+    edited tracks, their mix and the markers.
+
+    Returns the edit file, then the other files written. The edit file is written last.
+    """
     cache_path = out_dir / f"{episode.name}.words.json"
     path = out_dir / f"{episode.name}.edit.md"
     try:
         out_dir.mkdir(parents=True, exist_ok=True)  # before the analysis, so it fails early
     except OSError as exc:
         raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
+    # Before the analysis too: tracks that cannot be edited together fail at once.
+    rate = None if dry_run else check_renderable([t.info.path for t in episode.tracks])
     result = analyze(episode, settings, cache_path=cache_path, progress=progress)
+    outputs = [] if rate is None else _render(result, settings, out_dir, rate, progress)
+    result = replace(result, dry_run=dry_run, outputs=tuple(outputs))
     try:
         path.write_text(render_edit_file(result, __version__, date.today()), encoding="utf-8")
     except OSError as exc:
         raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
-    return path
+    return [path, *outputs]
