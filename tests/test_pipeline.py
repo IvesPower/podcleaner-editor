@@ -747,3 +747,48 @@ def test_dry_run_on_an_amix_of_the_test_recording(tmp_path):
     text = _run_and_check(tmp_path, [mixed], "amix")
     assert "Not available: both voices are on one track." in text
     assert "3 hesitations removed" in text and "0 flagged." in text
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not SAMPLES.is_dir(), reason="samples/pedit/ is not available")
+def test_pedit_edit_outputs(tmp_path):
+    name = "pedit"
+    result = _cli(
+        "--voice",
+        JULIEN_WAV,
+        "--voice",
+        FRANCK_WAV,
+        "--film",
+        FILM_WAV,
+        "--out",
+        tmp_path / name,
+    )
+    assert result.exit_code == 0, result.output
+    out = tmp_path / name
+    # The default settings name the voices "Voice A" and "Voice B".
+    names = ["voice-a", "voice-b", "film", "mix"]
+    wavs = [out / f"{name}.{n}.wav" for n in names]
+    midi = out / f"{name}.markers.mid"
+    for path in [*wavs, midi, out / f"{name}.edit.md", out / f"{name}.words.json"]:
+        assert path.is_file(), path
+
+    infos = [sf.info(p) for p in wavs]
+    assert len({i.frames for i in infos}) == 1
+    assert all(i.samplerate == 44100 and i.subtype == "FLOAT" for i in infos)
+
+    # The written duration is the final duration of the edit file, within 1 ms.
+    episode = load_episode([JULIEN_WAV, FRANCK_WAV], FILM_WAV, name, Settings())
+    analysed = pipeline.analyze(episode, Settings(), cache_path=out / f"{name}.words.json")
+    expected = analysed.cuts.final_duration(episode.duration)
+    assert abs(infos[0].frames / 44100 - expected) < 0.001
+
+    # The mix carries as many markers as the MIDI file and the markers of the analysis.
+    in_mix = read_wav_markers(wavs[3])
+    assert len(in_mix) == len(_midi_markers(midi)) == len(pipeline.markers_of(analysed))
+
+    # The gate is closed between Julien's sentences: at least 0.4 s of exact zeros.
+    julien, _ = sf.read(wavs[0], dtype="float32", always_2d=True)
+    silent = np.all(julien == 0, axis=1).astype(np.int8)
+    edges = np.diff(np.concatenate(([0], silent, [0])))
+    runs = np.flatnonzero(edges == -1) - np.flatnonzero(edges == 1)
+    assert runs.max(initial=0) >= 0.4 * 44100
