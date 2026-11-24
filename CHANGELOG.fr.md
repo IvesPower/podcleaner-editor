@@ -8,6 +8,9 @@ Tous les changements notables de podcleaner-editor. Les versions suivent le [ver
 
 ### Ajouts
 
+- `pedit run` sans `--dry-run` écrit l'audio monté : une piste par voix (ou la piste des voix mélangées) et la piste film, coupées aux mêmes échantillons avec un fondu enchaîné à puissance constante (30 ms) à chaque raccord, un mixage stéréo, et les marqueurs dans un fichier MIDI et dans le WAV du mixage. Le fichier de montage liste les fichiers écrits et ses timecodes « Final » tombent sur l'audio.
+- Une porte sur chaque piste de voix, comme Strip Silence de Logic Pro (-30 dB, 0,5 s, attaque 10 ms, relâchement 0,1 s), décidée sur le niveau sonore avec le test de repisse ; la section `[gate]` de la configuration la règle ou la coupe.
+- Écriture sûre : les fichiers sont écrits sous un nom temporaire puis renommés, jamais laissés à moitié écrits après une erreur ; la place sur le disque est vérifiée d'abord, et des pistes de fréquences différentes ou de plus de 2 canaux arrêtent la commande avec une erreur claire.
 - `pedit run --dry-run` transcrit désormais les passages où quelqu'un parle (Whisper : mlx-whisper sur Apple silicon, faster-whisper ailleurs ; le modèle, environ 1,6 Go, est téléchargé au premier lancement) et garde les mots dans `<nom>.words.json` : un second lancement ne retranscrit pas.
 - Hésitations : chaque « euh » isolé est retiré, les autres (une autre voix ou un autre mot en même temps, un extrait de film, trop long) sont signalés dans le fichier de montage avec les mots autour.
 - Marqueurs vocaux : une consigne parlée à Claude (un appel en début de phrase, « dis Claude » ou « Claude » suivi d'une virgule ou d'une pause, puis un verbe d'action comme « couper » ou « ajouter ») devient un événement `Requested cut` ou `Clip to add`, et la consigne elle-même est retirée quand personne ne parle par-dessus ; une consigne sans fin nette en 15 s reste dans l'audio.

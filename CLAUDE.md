@@ -8,7 +8,7 @@ CLI Python qui fait le travail répétitif du montage d'un épisode de podcast :
 
 ## Commandes
 
-La CLI fait `init`, `config`, `run --dry-run` et `version` (fin du jalon M1) ; l'audio monté arrive avec M3.
+La CLI fait `init`, `config`, `run` et `version` ; `run` sans `--dry-run` écrit les pistes montées, le mixage et les marqueurs (jalon M3). Le son studio arrive avec M4.
 
 ```bash
 # Essai sur l'enregistrement de test (samples/pedit, lien local hors git)
@@ -52,7 +52,8 @@ Le hook `.claude/hooks/python_checks.py` lance Ruff et les tests rapides après 
 | Blancs | Tout silence > 1 s où toutes les pistes se taisent est ramené à ~0,4 s, avec un fondu |
 | Chevauchements | Timecode seul, aucune baisse de volume |
 | Son | Mixage à -16 LUFS et -1 dBTP ; banc d'essai contre les paires brut / Auphonic |
-| Sorties | Pistes coupées aux mêmes endroits, mixage stéréo, un seul fichier de montage `.md` (Timecodes + Report), marqueurs MIDI et dans le WAV du mixage |
+| Sorties | Pistes coupées aux mêmes endroits à l'échantillon près avec fondu enchaîné de 30 ms à chaque raccord (`<nom>.<voix>.wav`, `<nom>.film.wav`), mixage stéréo `<nom>.mix.wav` (somme, sans normalisation avant M4), un seul fichier de montage `.md` (Timecodes + Report), marqueurs MIDI (`<nom>.markers.mid`) et dans le WAV du mixage ; écriture sous nom temporaire puis renommage, place disque vérifiée |
+| Porte | Sur chaque piste de voix (pas le film), comme Strip Silence de Logic : -30 dB, 0,5 s, attaque 10 ms, relâchement 0,1 s (`[gate]`), décidée sur le niveau avec le test de repisse, calculée par `analyze()` ; valeurs non encore validées à l'oreille |
 | Analyses | Toujours sur l'audio original ; la carte des coupes recale les timecodes sur le final |
 | `--dry-run` | Rapport et timecodes, aucun audio écrit |
 
