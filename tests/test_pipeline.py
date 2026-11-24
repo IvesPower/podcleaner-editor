@@ -632,6 +632,16 @@ def test_run_checks_the_tracks_before_the_analysis(tmp_path, monkeypatch):
         pipeline.run(episode, SETTINGS, tmp_path / "out", dry_run=False)
 
 
+def test_run_reports_a_track_that_cannot_be_opened(tmp_path):
+    a = _voice(tmp_path / "julien.wav", 10)
+    b = _voice(tmp_path / "franck.wav", 10)
+    film = _film(tmp_path / "film.wav", 10, (0, 0), sr=RATE)
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    b.write_bytes(b"not a wav file")
+    with pytest.raises(EditorError, match=re.escape("Could not open the tracks: ")):
+        pipeline.run(episode, SETTINGS, tmp_path / "out", dry_run=False)
+
+
 @pytest.mark.parametrize(
     ("label", "slug"),
     [
@@ -649,6 +659,12 @@ def test_file_slug(label, slug):
 def test_voice_slugs_number_duplicates():
     assert pipeline.voice_slugs(["Élodie", "elodie"]) == ["elodie-1", "elodie-2"]
     assert pipeline.voice_slugs(["Julien", "Franck"]) == ["julien", "franck"]
+
+
+def test_voice_slugs_never_take_the_film_or_mix_names():
+    assert pipeline.voice_slugs(["Film", "Mix"]) == ["film-1", "mix-1"]
+    assert pipeline.voice_slugs(["film", "Film"]) == ["film-1", "film-2"]
+    assert pipeline.voice_slugs(["Julien + Film"]) == ["julien-film"]
 
 
 JULIEN_WAV = SAMPLES / "pedit-full-piste-1-julien.wav"

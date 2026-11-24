@@ -274,14 +274,19 @@ def file_slug(label: str) -> str:
     return slug or "voice"
 
 
+# Slugs of the film and mix outputs, which a voice must not take.
+_TAKEN_SLUGS = frozenset({"film", "mix"})
+
+
 def voice_slugs(labels: Sequence[str]) -> list[str]:
-    """The slug of each label, numbered `-1`, `-2`… when several labels give the same one."""
+    """The slug of each label, numbered `-1`, `-2`… when several labels give the same one,
+    or when it is the slug of the film or mix output."""
     slugs = [file_slug(label) for label in labels]
     counts = Counter(slugs)
     seen: Counter[str] = Counter()
     numbered = []
     for slug in slugs:
-        if counts[slug] > 1:
+        if counts[slug] > 1 or slug in _TAKEN_SLUGS:
             seen[slug] += 1
             slug = f"{slug}-{seen[slug]}"
         numbered.append(slug)
@@ -347,7 +352,12 @@ def run(
     except OSError as exc:
         raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
     # Before the analysis too: tracks that cannot be edited together fail at once.
-    rate = None if dry_run else check_renderable([t.info.path for t in episode.tracks])
+    rate = None
+    if not dry_run:
+        try:
+            rate = check_renderable([t.info.path for t in episode.tracks])
+        except (OSError, sf.SoundFileError) as exc:
+            raise EditorError(f"Could not open the tracks: {exc}") from exc
     result = analyze(episode, settings, cache_path=cache_path, progress=progress)
     outputs = [] if rate is None else _render(result, settings, out_dir, rate, progress)
     result = replace(result, dry_run=dry_run, outputs=tuple(outputs))
