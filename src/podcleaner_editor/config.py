@@ -259,7 +259,10 @@ def _convert(name: str, raw: Any, label: str) -> Any:
             or not all(isinstance(v, str) and v.strip() for v in raw)
         ):
             raise EditorError(f'{label} must list two names, such as ["Julien", "Marc"]')
-        return (raw[0].strip(), raw[1].strip())
+        first, second = raw[0].strip(), raw[1].strip()
+        if first.casefold() == second.casefold():
+            raise EditorError(f"{label} must be two different names")
+        return (first, second)
     if isinstance(default, tuple):
         if (
             not isinstance(raw, list)

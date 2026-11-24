@@ -93,6 +93,13 @@ def test_wrong_type_raises(tmp_path):
         load_settings(path)
 
 
+@pytest.mark.parametrize("names", ['["Julien", "Julien"]', '["Julien", " julien "]'])
+def test_speakers_must_be_two_different_names(tmp_path, names):
+    path = _write(tmp_path / "c.toml", f"[recording]\nspeakers = {names}\n")
+    with pytest.raises(EditorError, match=r"\[recording\] speakers must be two different names"):
+        load_settings(path)
+
+
 def test_speakers_must_be_two_names(tmp_path):
     path = _write(tmp_path / "c.toml", '[recording]\nspeakers = ["Julien"]\n')
     with pytest.raises(EditorError, match="two"):
