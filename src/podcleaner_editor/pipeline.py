@@ -34,7 +34,7 @@ from podcleaner_editor.detect.silences import find_silence_cuts
 from podcleaner_editor.episode import Episode
 from podcleaner_editor.errors import EditorError
 from podcleaner_editor.events import Event, EventType
-from podcleaner_editor.render.markers import Marker, add_wav_markers, marker_name, write_midi
+from podcleaner_editor.render.markers import Marker, marker_name, write_midi
 from podcleaner_editor.render.splice import splice_plan
 from podcleaner_editor.render.writer import RenderTrack, check_renderable, write_edit
 from podcleaner_editor.report.markdown import AnalysisResult, render_edit_file
@@ -318,8 +318,8 @@ def _render(
     markers = markers_of(result)
     progress("Writing the edited tracks…")
     try:
-        write_edit(tracks, pieces, n_total, mix, settings)
-        if not add_wav_markers(mix, markers, rate):
+        _, marked = write_edit(tracks, pieces, n_total, mix, settings, markers)
+        if not marked:
             progress(f"⚠ The mix is over 4 GB (RF64): its markers are only in {midi.name}.")
         write_midi(markers, midi)
     except (OSError, sf.SoundFileError) as exc:

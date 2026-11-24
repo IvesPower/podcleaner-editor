@@ -114,7 +114,7 @@ Sur chaque piste de voix, l'audio est ramené à zéro (silence numérique) là 
 - **Position** : le timecode « Final » du début de l'événement, le même que dans le fichier de montage.
 - **Nom** : le type puis la raison, par exemple `Clip to add: Spoken instruction: "dis Claude, ajoute l'extrait…"`, coupé à une longueur raisonnable. *Choix de Claude.*
 - **Fichier MIDI** : fichier MIDI standard de type 0, qui ne contient qu'un tempo fixe (120 bpm) et un événement « marqueur » (méta FF 06) par marqueur, à la bonne position en ticks. Il est écrit à la main, sans nouvelle dépendance. *Choix de Claude.*
-- **WAV du mixage** : un bloc `cue ` et un bloc `LIST`/`adtl` avec un `labl` par marqueur, ajoutés après les données audio du mixage. Logic sait lire ces marqueurs (« Importer les marqueurs du fichier audio »).
+- **WAV du mixage** : un bloc `cue ` et un bloc `LIST`/`adtl` avec un `labl` par marqueur, ajoutés après les données audio du mixage, quand il est encore le fichier `.tmp`, avant qu'il remplace l'ancien mixage ; laissés de côté, comme en RF64, s'ils faisaient passer le fichier au-delà de 4 Gio. Logic sait lire ces marqueurs (« Importer les marqueurs du fichier audio »).
 - Quel format Logic lit le mieux, et si le fichier MIDI tombe bien au début du projet : c'est à vérifier dans Logic. La feuille de route le prévoit au M6. Julien pourra le dire dès le premier essai du M3.
 
 ### Le fichier de montage

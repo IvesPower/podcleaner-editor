@@ -11,6 +11,7 @@ from podcleaner_editor.config import Settings
 from podcleaner_editor.cutmap import CutMap
 from podcleaner_editor.errors import EditorError
 from podcleaner_editor.render import writer
+from podcleaner_editor.render.markers import Marker, read_wav_markers
 from podcleaner_editor.render.splice import fade_curves, splice_plan
 from podcleaner_editor.render.writer import (
     RenderTrack,
@@ -53,7 +54,7 @@ def test_tracks_cut_at_the_same_samples(tmp_path):
         RenderTrack(a, tmp_path / "out.a.wav", None),
         RenderTrack(b, tmp_path / "out.b.wav", None),
     ]
-    n_out = write_edit(tracks, _plan([(0.4, 0.6)]), 1000, tmp_path / "out.mix.wav", _settings())
+    n_out, _ = write_edit(tracks, _plan([(0.4, 0.6)]), 1000, tmp_path / "out.mix.wav", _settings())
     assert n_out == 800
     expected_a = np.concatenate([ramp[0:400], ramp[600:1000]])
     expected_b = np.concatenate([ramp[::-1][0:400], ramp[::-1][600:1000]])
@@ -67,7 +68,7 @@ def test_crossfade_at_the_join(tmp_path):
     a = _wav(tmp_path / "a.wav", ramp)
     plan = _plan([(0.4, 0.6)], fade_ms=30)
     tracks = [RenderTrack(a, tmp_path / "out.a.wav", None)]
-    n_out = write_edit(tracks, plan, 1000, tmp_path / "out.mix.wav", _settings(30))
+    n_out, _ = write_edit(tracks, plan, 1000, tmp_path / "out.mix.wav", _settings(30))
     assert n_out == 800
     out = _read(tmp_path / "out.a.wav")[:, 0]
     assert len(out) == 800
@@ -143,7 +144,7 @@ def test_shorter_track_sets_the_length(tmp_path):
         RenderTrack(a, tmp_path / "out.a.wav", None),
         RenderTrack(b, tmp_path / "out.b.wav", None),
     ]
-    n_out = write_edit(tracks, _plan([(0.4, 0.6)]), 1000, tmp_path / "out.mix.wav", _settings())
+    n_out, _ = write_edit(tracks, _plan([(0.4, 0.6)]), 1000, tmp_path / "out.mix.wav", _settings())
     assert n_out == 800
     for name in ("out.a.wav", "out.b.wav", "out.mix.wav"):
         assert sf.info(tmp_path / name).frames == 800
@@ -246,6 +247,38 @@ def test_close_error_during_cleanup_still_deletes_tmp(tmp_path, monkeypatch, fai
     with pytest.raises(expected):
         write_edit(tracks, _plan([(0.4, 0.6)]), 1000, targets[2], _settings())
     assert calls["close"] >= 1
+    assert list(tmp_path.glob("*.tmp")) == []
+    for target in targets:
+        assert target.read_text(encoding="utf-8") == "old"
+
+
+def test_markers_are_added_to_the_mix(tmp_path):
+    a = _wav(tmp_path / "a.wav", _ramp())
+    mix = tmp_path / "out.mix.wav"
+    tracks = [RenderTrack(a, tmp_path / "out.a.wav", None)]
+    markers = [Marker(0.1, "Clip to add: x"), Marker(0.5, "Requested cut: y")]
+    n_out, marked = write_edit(tracks, _plan([(0.4, 0.6)]), 1000, mix, _settings(), markers)
+    assert (n_out, marked) == (800, True)
+    assert read_wav_markers(mix) == [(100, "Clip to add: x"), (500, "Requested cut: y")]
+    np.testing.assert_allclose(_read(mix)[:400, 0], _ramp()[:400], atol=1e-7)
+
+
+def test_marker_error_keeps_the_old_mix(tmp_path, monkeypatch):
+    a = _wav(tmp_path / "a.wav", _ramp())
+    targets = [tmp_path / "out.a.wav", tmp_path / "out.mix.wav"]
+    for target in targets:
+        target.write_text("old", encoding="utf-8")
+
+    def interrupted(path, markers, rate):
+        # Half the chunks appended, the RIFF size not yet rewritten.
+        with open(path, "ab") as f:
+            f.write(b"cue ")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(writer, "add_wav_markers", interrupted)
+    tracks = [RenderTrack(a, targets[0], None)]
+    with pytest.raises(KeyboardInterrupt):
+        write_edit(tracks, _plan([]), 1000, targets[1], _settings(), [Marker(0.1, "x")])
     assert list(tmp_path.glob("*.tmp")) == []
     for target in targets:
         assert target.read_text(encoding="utf-8") == "old"

@@ -12,6 +12,7 @@ import soundfile as sf
 from podcleaner_editor.config import Settings
 from podcleaner_editor.errors import EditorError
 from podcleaner_editor.render.gain import gate_gain
+from podcleaner_editor.render.markers import Marker, add_wav_markers
 from podcleaner_editor.render.splice import Piece, fade_curves
 from podcleaner_editor.timeline import Interval
 
@@ -237,13 +238,16 @@ def write_edit(
     n_total: int,
     mix_target: Path,
     settings: Settings,
-) -> int:
-    """Write every cut track and their stereo mix in one streamed pass; return `n_out`.
+    markers: list[Marker] | None = None,
+) -> tuple[int, bool]:
+    """Write every cut track and their stereo mix in one streamed pass; return `n_out` and
+    whether the `markers` went into the mix (False when it is RF64 or would pass 4 GiB).
 
-    Each output is first written to `<target>.tmp`; the targets are replaced only at the
-    end, once every file is written and closed. An error, or Ctrl+C, before that deletes
-    the `.tmp` files and leaves the existing targets as they were. A failure while
-    renaming can leave some targets new and some old, but never a half-written file.
+    Each output is first written to `<target>.tmp`, the markers added to the mix's; the
+    targets are replaced only at the end, once every file is written and closed. An error,
+    or Ctrl+C, before that deletes the `.tmp` files and leaves the existing targets as they
+    were. A failure while renaming can leave some targets new and some old, but never a
+    half-written file.
     """
     sources = [track.source for track in tracks]
     rate = check_renderable(sources)
@@ -273,6 +277,7 @@ def write_edit(
         for track in opened:
             track.close()
         mix.close()
+        marked = add_wav_markers(mix_tmp, markers or [], rate)
     except BaseException:
         handles = [h for t in opened for h in (t.reader, t.output)] + [mix]
         _discard(handles, [_tmp_path(track.target) for track in tracks] + [mix_tmp])
@@ -284,4 +289,4 @@ def write_edit(
     except BaseException:
         _discard([], [tmp for tmp, _ in moves])
         raise
-    return n_out
+    return n_out, marked

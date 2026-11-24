@@ -10,6 +10,8 @@ _DIVISION = 960
 _TICKS_PER_S = 1920  # 120 bpm, 960 ticks per quarter note
 _TEMPO = bytes([0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20])
 _END_OF_TRACK = bytes([0x00, 0xFF, 0x2F, 0x00])
+# Largest RIFF size a plain WAV file can declare.
+_WAV_LIMIT = 0xFFFFFFFF
 
 
 @dataclass(frozen=True)
@@ -27,7 +29,8 @@ def marker_name(kind: str, reason: str) -> str:
 
 
 def _vlq(value: int) -> bytes:
-    """MIDI variable-length quantity."""
+    """MIDI variable-length quantity; a negative value counts as 0."""
+    value = max(0, value)
     out = [value & 0x7F]
     value >>= 7
     while value:
@@ -67,7 +70,8 @@ def _chunk(chunk_id: bytes, body: bytes) -> bytes:
 
 
 def add_wav_markers(path: Path, markers: list[Marker], rate: int) -> bool:
-    """Append `cue ` and `LIST adtl` chunks to a WAV; False if it is RF64."""
+    """Append `cue ` and `LIST adtl` chunks to a WAV; False, leaving it untouched, if it is
+    RF64 or if the chunks would make it too large for a plain WAV."""
     if not markers:
         return True
     with open(path, "r+b") as f:
@@ -80,12 +84,13 @@ def add_wav_markers(path: Path, markers: list[Marker], rate: int) -> bool:
             cues += struct.pack("<II4sIII", k, offset, b"data", 0, 0, offset)
             text = marker.name.encode("utf-8") + b"\x00"
             labels += _chunk(b"labl", struct.pack("<I", k) + text)
-        f.seek(0, os.SEEK_END)
-        if f.tell() % 2:
-            f.write(b"\x00")
-        f.write(_chunk(b"cue ", bytes(cues)))
-        f.write(_chunk(b"LIST", bytes(labels)))
-        size = f.tell()
+        chunks = _chunk(b"cue ", bytes(cues)) + _chunk(b"LIST", bytes(labels))
+        end = f.seek(0, os.SEEK_END)
+        pad = b"\x00" if end % 2 else b""
+        size = end + len(pad) + len(chunks)
+        if size - 8 > _WAV_LIMIT:
+            return False
+        f.write(pad + chunks)
         f.seek(4)
         f.write(struct.pack("<I", size - 8))
     return True

@@ -1,6 +1,7 @@
 import numpy as np
 import soundfile as sf
 
+from podcleaner_editor.render import markers as markers_module
 from podcleaner_editor.render.markers import (
     MAX_NAME,
     Marker,
@@ -100,6 +101,21 @@ def test_rf64_is_left_untouched(tmp_path):
     before = path.read_bytes()
     assert add_wav_markers(path, [Marker(1.0, "x")], 100) is False
     assert path.read_bytes() == before
+
+
+def test_wav_markers_left_out_past_the_wav_size_limit(tmp_path, monkeypatch):
+    path = tmp_path / "mix.wav"
+    sf.write(path, np.zeros((100, 2), dtype=np.float32), 100, subtype="FLOAT")
+    before = path.read_bytes()
+    # The markers would push the RIFF size past what a plain WAV can declare.
+    monkeypatch.setattr(markers_module, "_WAV_LIMIT", len(before))
+    assert add_wav_markers(path, [Marker(0.5, "x")], 100) is False
+    assert path.read_bytes() == before
+
+
+def test_vlq_of_a_negative_value_is_zero():
+    assert markers_module._vlq(-1) == markers_module._vlq(0) == b"\x00"
+    assert markers_module._vlq(200) == b"\x81\x48"
 
 
 def test_unicode_names_round_trip(tmp_path):

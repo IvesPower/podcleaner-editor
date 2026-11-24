@@ -114,7 +114,7 @@ On each voice track, the audio is brought down to zero (digital silence) where t
 - **Position**: the "Final" timecode of the event's start, the same as in the edit file.
 - **Name**: the type then the reason, for example `Clip to add: Spoken instruction: "dis Claude, ajoute l'extrait…"`, cut to a reasonable length. *Claude's call.*
 - **MIDI file**: a type 0 standard MIDI file holding only a fixed tempo (120 bpm) and one "marker" meta event (FF 06) per marker, at the right position in ticks. Written by hand, with no new dependency. *Claude's call.*
-- **Mix WAV**: a `cue ` chunk and a `LIST`/`adtl` chunk with one `labl` per marker, added after the mix's audio data. Logic can read these markers ("Import Marker from Audio File").
+- **Mix WAV**: a `cue ` chunk and a `LIST`/`adtl` chunk with one `labl` per marker, added after the mix's audio data, while it is still the `.tmp` file, before it replaces the old mix; left out, as for RF64, if they would take the file past 4 GiB. Logic can read these markers ("Import Marker from Audio File").
 - Which format Logic reads best, and whether the MIDI file lands at the start of the project: to check in Logic. The roadmap plans it for M6. Julien can tell from the first M3 test.
 
 ### The edit file
