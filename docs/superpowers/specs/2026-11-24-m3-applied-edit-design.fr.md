@@ -74,9 +74,9 @@ Dans le dossier de l'épisode, à côté de `<nom>.edit.md` et `<nom>.words.json
 | `<nom>.mix.wav` | Le mixage stéréo, avec les marqueurs inscrits dedans |
 | `<nom>.markers.mid` | Un fichier MIDI qui ne contient que les marqueurs |
 
-`<voix>` est le prénom de la configuration, réduit à un nom de fichier sûr sur macOS et Windows (par exemple `julien`, `julien-franck` pour les voix mélangées). *Choix de Claude.*
+`<voix>` est le prénom de la configuration, réduit à un nom de fichier sûr sur macOS et Windows (par exemple `julien`, `julien-franck` pour les voix mélangées), numéroté (`film-1`, `mix-1`) s'il prenait le nom de la piste du film ou du mixage. *Choix de Claude.*
 
-Les fichiers sont écrits dans le **même format que les bruts** : même fréquence, même encodage (float 32 bits chez Julien), mêmes canaux. Le mixage est stéréo, dans l'encodage de la piste la plus précise. *Choix de Claude.*
+Les fichiers sont écrits dans le **même format que les bruts** : même fréquence, même encodage (float 32 bits chez Julien), mêmes canaux. Le mixage est stéréo, toujours en float 32 bits. *Choix de Claude.*
 
 `--dry-run` ne change pas : rapport et timecodes, aucun audio.
 

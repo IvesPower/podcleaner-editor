@@ -52,7 +52,7 @@ pedit config --path   # seulement l'emplacement du fichier
 
 ## Lancer
 
-Sans `--dry-run`, `run` écrit aussi l'audio monté ; avec `--dry-run`, il n'écrit que le fichier de montage.
+Sans `--dry-run`, `run` écrit aussi l'audio monté ; avec `--dry-run`, il n'écrit que le fichier de montage. Un `--dry-run` après un passage complet laisse en place les fichiers audio précédents : ils peuvent ne plus correspondre au nouveau fichier de montage.
 
 ```bash
 # Un fichier par voix

@@ -52,7 +52,7 @@ pedit config --path   # only where the file is
 
 ## Run
 
-Without `--dry-run`, `run` writes the edited audio too; with `--dry-run` it only writes the edit file.
+Without `--dry-run`, `run` writes the edited audio too; with `--dry-run` it only writes the edit file. A `--dry-run` after a full run leaves the earlier audio files in place: they may no longer match the new edit file.
 
 ```bash
 # One file per voice

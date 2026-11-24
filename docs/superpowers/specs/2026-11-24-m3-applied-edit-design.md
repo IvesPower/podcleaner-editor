@@ -74,9 +74,9 @@ In the episode folder, next to `<name>.edit.md` and `<name>.words.json`:
 | `<name>.mix.wav` | The stereo mix, with the markers written in it |
 | `<name>.markers.mid` | A MIDI file that holds only the markers |
 
-`<voice>` is the first name from the configuration, reduced to a file name that is safe on macOS and Windows (for example `julien`, `julien-franck` for mixed voices). *Claude's call.*
+`<voice>` is the first name from the configuration, reduced to a file name that is safe on macOS and Windows (for example `julien`, `julien-franck` for mixed voices), numbered (`film-1`, `mix-1`) when it would take the name of the film track or of the mix. *Claude's call.*
 
-Files are written in **the same format as the raw files**: same rate, same encoding (32-bit float for Julien), same channels. The mix is stereo, in the encoding of the most precise track. *Claude's call.*
+Files are written in **the same format as the raw files**: same rate, same encoding (32-bit float for Julien), same channels. The mix is stereo, always in 32-bit float. *Claude's call.*
 
 `--dry-run` does not change: report and timecodes, no audio.
 
