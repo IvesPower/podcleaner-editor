@@ -1046,3 +1046,54 @@ def test_pedit_edit_outputs(tmp_path):
     edges = np.diff(np.concatenate(([0], silent, [0])))
     runs = np.flatnonzero(edges == -1) - np.flatnonzero(edges == 1)
     assert runs.max(initial=0) >= 0.4 * 44100
+
+
+AUPHONIC_MP3 = SAMPLES / "pedit-full-ia.mp3"
+AUPHONIC_SPEECH_START_S = 6.4087  # the jingle before it is ignored
+BANDS_HZ = [(60, 150), (150, 300), (300, 800), (800, 2000), (2000, 4000), (4000, 8000)]
+
+
+def _band_balance_db(samples: np.ndarray) -> np.ndarray:
+    """Level of each band in dB relative to the 800-2000 Hz band, from a Welch spectrum."""
+    from scipy.signal import welch
+
+    freqs, power = welch(samples, fs=ANALYSIS_RATE, nperseg=4096)
+    levels = np.array(
+        [10 * np.log10(power[(freqs >= lo) & (freqs < hi)].sum()) for lo, hi in BANDS_HZ]
+    )
+    return levels - levels[3]
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not SAMPLES.is_dir(), reason="samples/pedit/ is not available")
+def test_pedit_studio_sound(tmp_path):
+    # Slow tests skip the conftest denoiser fake, so this one runs the real DeepFilterNet.
+    name = "pedit"
+    result = _cli(
+        "--voice", JULIEN_WAV, "--voice", FRANCK_WAV, "--film", FILM_WAV, "--out", tmp_path / name
+    )
+    assert result.exit_code == 0, result.output
+    out = tmp_path / name
+    names = ["voice-a", "voice-b", "film", "mix"]
+    wavs = [out / f"{name}.{n}.wav" for n in names]
+    assert len({sf.info(p).frames for p in wavs}) == 1
+
+    mix = measure([wavs[3]])
+    text = (out / f"{name}.edit.md").read_text(encoding="utf-8")
+    assert "### Sound" in text
+    assert mix.true_peak_db <= -1.0 + 0.05
+    if "Target not reached" in text:
+        # The film's loud clip peaks near -1 dBTP, so the true peak caps the shared gain:
+        # the mix then sits under the target with its peak held at the ceiling.
+        assert mix.lufs < -16.0
+        assert mix.true_peak_db == pytest.approx(-1.0, abs=0.1)
+    else:
+        assert mix.lufs == pytest.approx(-16.0, abs=0.5)
+
+    if not AUPHONIC_MP3.is_file():
+        pytest.skip("pedit-full-ia.mp3 is not available")
+    # Long-term spectra: the mix is the cut edit and the Auphonic file is not, so no alignment.
+    ours = _band_balance_db(decode_mono_16k(wavs[3]))
+    reference = decode_mono_16k(AUPHONIC_MP3)[int(AUPHONIC_SPEECH_START_S * ANALYSIS_RATE) :]
+    difference = np.abs(ours - _band_balance_db(reference))
+    assert difference.mean() <= 2.5, difference
