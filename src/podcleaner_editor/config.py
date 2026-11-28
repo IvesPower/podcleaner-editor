@@ -68,6 +68,8 @@ class Settings:
     marker_min_score: float = 80.0
     marker_pause_s: float = 0.5
     marker_max_s: float = 15.0
+    # Julien keeps the instructions in the audio and cuts them himself (Nov 26, 2026).
+    marker_cut_instructions: bool = False
     marker_pad_s: float = 0.1
     # Overlap values tuned on the test recording (samples/pedit): the rule flags widely,
     # Claude (M5) is the one that sets backchannels aside.
@@ -172,6 +174,10 @@ _KEYS: dict[tuple[str, str], tuple[str, str]] = {
         "A pause this long starts or ends an instruction (seconds).",
     ),
     ("markers", "max_s"): ("marker_max_s", "Longest instruction (seconds)."),
+    ("markers", "cut_instructions"): (
+        "marker_cut_instructions",
+        "Also cut the instruction itself from the audio (it is always marked).",
+    ),
     ("markers", "pad_s"): ("marker_pad_s", "Margin cut around an instruction (seconds)."),
     ("overlaps", "min_s"): ("overlap_min_s", "Shortest talk-over flagged (seconds)."),
     ("overlaps", "floor_hold_s"): (

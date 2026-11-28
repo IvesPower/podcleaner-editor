@@ -206,6 +206,8 @@ def test_markers_section_counts_by_type():
         "3 instructions removed (00:00:05.100).\n"
     ) in text
     assert "No spoken markers." in _render_full()
+    kept = _render_full(events=events)
+    assert "2 requested cuts, 1 clip to add; instructions left in the audio.\n" in kept
 
 
 def test_transcription_section():

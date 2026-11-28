@@ -175,7 +175,8 @@ def test_marker_and_filler_in_result(quiet_film_files):
     julien = [*_words(("bonjour", 16.0, 16.5)), *MARKER_AT_20, *_words(("alors", 25.0, 25.5))]
     julien += _words(("euh", 40.0, 40.4), ("voilà", 41.0, 41.5))
     fake = _FakeTranscriber({"julien": julien})
-    result = _analyze(episode, fake, _fake_vad({90: [I(15, 45)], 91: [I(50, 55)]}))
+    cutting = replace(SETTINGS, marker_cut_instructions=True)
+    result = _analyze(episode, fake, _fake_vad({90: [I(15, 45)], 91: [I(50, 55)]}), cutting)
 
     requests = [e for e in result.events if e.type == EventType.CUT_REQUEST]
     assert [(e.track, e.start, e.end) for e in requests] == [("Julien", 20.0, 21.5)]
@@ -191,6 +192,19 @@ def test_marker_and_filler_in_result(quiet_film_files):
     expected = 80 - 43.8 - marker_cut.duration - filler_cut.duration
     assert result.cuts.to_final(80) == pytest.approx(expected)
     assert result.transcription.backend == "fake whisper"
+
+
+def test_instruction_left_in_the_audio_by_default(quiet_film_files):
+    a, b, film = quiet_film_files
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    julien = [*_words(("bonjour", 16.0, 16.5)), *MARKER_AT_20, *_words(("alors", 25.0, 25.5))]
+    fake = _FakeTranscriber({"julien": julien})
+    result = _analyze(episode, fake, _fake_vad({90: [I(15, 45)], 91: [I(50, 55)]}))
+
+    requests = [e for e in result.events if e.type == EventType.CUT_REQUEST]
+    assert [(e.start, e.end) for e in requests] == [(20.0, 21.5)]
+    assert result.marker_cuts == ()
+    assert not any(c.start < 21.5 and c.end > 20.0 for c in result.cuts.cuts)
 
 
 def test_bleed_word_counted_once(quiet_film_files):
@@ -245,7 +259,8 @@ def test_euh_inside_an_instruction_is_not_counted_twice(quiet_film_files):
         ("coupe.", 21.5, 21.9),
     )
     fake = _FakeTranscriber({"julien": julien})
-    result = _analyze(episode, fake, _fake_vad({90: [I(19, 23)], 91: [I(50, 55)]}))
+    cutting = replace(SETTINGS, marker_cut_instructions=True)
+    result = _analyze(episode, fake, _fake_vad({90: [I(19, 23)], 91: [I(50, 55)]}), cutting)
     assert len(result.marker_cuts) == 1
     [filler] = result.fillers
     assert filler.cut is None and filler.reason == "Inside a spoken instruction"
@@ -543,8 +558,8 @@ def test_markers_match_events_and_flagged_fillers(tmp_path, monkeypatch):
     [request] = [r for r in _table_rows(text, "## Timecodes") if r[1] == "Requested cut"]
     [flagged] = _table_rows(text, "### Hesitations")
     expected = [
-        (_seconds(request[4]), f"Requested cut: {request[6]}"),
-        (_seconds(flagged[1]), f"Hesitation: Julien + Franck: {OTHER_SPEECH}"),
+        (_seconds(request[4]), "Requested cut"),
+        (_seconds(flagged[1]), "Hesitation"),
     ]
     midi = _midi_markers(out / "ep.markers.mid")
     wav = [(pos / RATE, name) for pos, name in read_wav_markers(out / "ep.mix.wav")]
@@ -561,8 +576,8 @@ def test_markers_of_never_go_below_zero(edit_files):
     early = Event(EventType.OVERLAP, -0.01, 1.0, "Franck", "Early")
     result = AnalysisResult(episode, [late, early], CutMap((I(1.0, 2.0),)), True)
     assert pipeline.markers_of(result) == [
-        Marker(0.0, "Overlap: Early"),
-        Marker(2.0, "Overlap: Reason"),
+        Marker(0.0, "Overlap"),
+        Marker(2.0, "Overlap"),
     ]
 
 
@@ -709,14 +724,13 @@ def _run_and_check(tmp_path, voices, name: str) -> str:
     markers = [(r[1], _seconds(r[3])) for r in rows if r[1] in ("Clip to add", "Requested cut")]
     assert [t for t, _ in markers] == [t for t, _ in EXPECTED_MARKERS]
     assert _near([s for _, s in markers], [s for _, s in EXPECTED_MARKERS])
-    assert "3 spoken markers: 2 requested cuts, 1 clip to add; 3 instructions removed" in text
+    assert "3 spoken markers: 2 requested cuts, 1 clip to add; instructions left" in text
     clips = [r for r in rows if r[1] == "Film clip"]
     assert len(clips) == 1 and _near([_seconds(clips[0][3])], [62.27])
     assert _near([_seconds(clips[0][5])], [5.16])
-    # Six silences once the speech is cut: the one the instruction at 18.7 s splits counts
-    # once, the ones under the "euh" at 13.2 s and the instruction at 40.3 s are left to them
-    # (the 10 ms piece the instruction leaves is dropped).
-    assert "4 silences shortened, 00:00:06.9" in text
+    # The instructions stay in the audio (Julien cuts them himself): the five silences of M1,
+    # the one under the "euh" at 13.2 s being left to the "euh".
+    assert "5 silences shortened, 00:00:06.7" in text
     assert "mlx-whisper" in text or "faster-whisper" in text
 
     # The cut "euh"s are not listed in the edit file: read them back from the words cache.

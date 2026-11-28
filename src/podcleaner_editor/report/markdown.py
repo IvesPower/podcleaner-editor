@@ -149,13 +149,15 @@ def _markers(result: AnalysisResult) -> str:
     clips = sum(1 for e in result.events if e.type == EventType.CLIP_TO_ADD)
     if cut_requests + clips == 0:
         return "No spoken markers."
-    removed = format_tc(sum(c.end - c.start for c in result.marker_cuts))
     clip_text = f"{clips} clip to add" if clips == 1 else f"{clips} clips to add"
-    return (
+    head = (
         f"{_plural(cut_requests + clips, 'spoken marker')}: "
         f"{_plural(cut_requests, 'requested cut')}, {clip_text}; "
-        f"{_plural(len(result.marker_cuts), 'instruction')} removed ({removed})."
     )
+    if not result.marker_cuts:
+        return head + "instructions left in the audio."
+    removed = format_tc(sum(c.end - c.start for c in result.marker_cuts))
+    return head + f"{_plural(len(result.marker_cuts), 'instruction')} removed ({removed})."
 
 
 def _transcription(result: AnalysisResult) -> str:

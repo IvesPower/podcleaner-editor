@@ -5,7 +5,6 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
-MAX_NAME = 120
 _DIVISION = 960
 _TICKS_PER_S = 1920  # 120 bpm, 960 ticks per quarter note
 _TEMPO = bytes([0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20])
@@ -18,14 +17,6 @@ _WAV_LIMIT = 0xFFFFFFFF
 class Marker:
     time_s: float
     name: str
-
-
-def marker_name(kind: str, reason: str) -> str:
-    """`"kind: reason"`, shortened to `MAX_NAME` characters with a final "…"."""
-    name = f"{kind}: {reason}"
-    if len(name) <= MAX_NAME:
-        return name
-    return name[: MAX_NAME - 1] + "…"
 
 
 def _vlq(value: int) -> bytes:

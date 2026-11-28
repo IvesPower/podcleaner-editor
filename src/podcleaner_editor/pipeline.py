@@ -34,7 +34,7 @@ from podcleaner_editor.detect.silences import find_silence_cuts
 from podcleaner_editor.episode import Episode
 from podcleaner_editor.errors import EditorError
 from podcleaner_editor.events import Event, EventType
-from podcleaner_editor.render.markers import Marker, marker_name, write_midi
+from podcleaner_editor.render.markers import Marker, write_midi
 from podcleaner_editor.render.splice import splice_plan
 from podcleaner_editor.render.writer import RenderTrack, check_renderable, write_edit
 from podcleaner_editor.report.markdown import AnalysisResult, render_edit_file
@@ -249,18 +249,18 @@ def analyze(
     )
 
 
+# Julien wants plain markers in Logic (Nov 26, 2026): the type only, the reasons stay in the
+# edit file.
+HESITATION_MARKER = "Hesitation"
+
+
 def markers_of(result: AnalysisResult) -> list[Marker]:
-    """A marker for each event and each flagged hesitation, at its time on the final audio."""
+    """A marker for each event and each flagged hesitation, at its time on the final audio,
+    named by its type only."""
     cuts = result.cuts
-    markers = [
-        Marker(max(0.0, cuts.to_final(e.start)), marker_name(str(e.type), e.reason))
-        for e in result.events
-    ]
+    markers = [Marker(max(0.0, cuts.to_final(e.start)), str(e.type)) for e in result.events]
     markers += [
-        Marker(
-            max(0.0, cuts.to_final(f.word.start)),
-            marker_name("Hesitation", f"{f.track}: {f.reason}"),
-        )
+        Marker(max(0.0, cuts.to_final(f.word.start)), HESITATION_MARKER)
         for f in result.fillers
         if f.cut is None
     ]

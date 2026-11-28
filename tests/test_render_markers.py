@@ -3,10 +3,8 @@ import soundfile as sf
 
 from podcleaner_editor.render import markers as markers_module
 from podcleaner_editor.render.markers import (
-    MAX_NAME,
     Marker,
     add_wav_markers,
-    marker_name,
     read_wav_markers,
     write_midi,
 )
@@ -126,11 +124,3 @@ def test_unicode_names_round_trip(tmp_path):
     sf.write(wav, np.zeros((100, 2), dtype=np.float32), 100, subtype="FLOAT")
     add_wav_markers(wav, [Marker(2.0, UNICODE_NAME)], 100)
     assert read_wav_markers(wav) == [(200, UNICODE_NAME)]
-
-
-def test_marker_name_is_cut_cleanly():
-    name = marker_name("Requested cut", "é" * 300)
-    assert len(name) == MAX_NAME == 120
-    assert name.endswith("…")
-    name.encode("utf-8")
-    assert marker_name("Clip", "short") == "Clip: short"
