@@ -112,7 +112,7 @@ On each voice track, the audio is brought down to zero (digital silence) where t
 
 - **What becomes a marker**: every event of the edit file (requested cuts, clips to add, film clips, overlaps), plus the "euh"s flagged but not cut. Those are exactly the places where Julien may want to cut. *Proposed by Claude, not contradicted by Julien.*
 - **Position**: the "Final" timecode of the event's start, the same as in the edit file.
-- **Name**: the type then the reason, for example `Clip to add: Spoken instruction: "dis Claude, ajoute l'extrait…"`, cut to a reasonable length. *Claude's call.*
+- **Name**: the type only (`Requested cut`, `Clip to add`, `Film clip`, `Overlap`, `Hesitation`); the reasons stay in the edit file. *Changed after Julien listened on Nov 28, 2026 and asked for plain markers; the spoken instruction also stays in the audio (`[markers] cut_instructions = false`), and Julien cuts it himself.*
 - **MIDI file**: a type 0 standard MIDI file holding only a fixed tempo (120 bpm) and one "marker" meta event (FF 06) per marker, at the right position in ticks. Written by hand, with no new dependency. *Claude's call.*
 - **Mix WAV**: a `cue ` chunk and a `LIST`/`adtl` chunk with one `labl` per marker, added after the mix's audio data, while it is still the `.tmp` file, before it replaces the old mix; left out, as for RF64, if they would take the file past 4 GiB. Logic can read these markers ("Import Marker from Audio File").
 - Which format Logic reads best, and whether the MIDI file lands at the start of the project: to check in Logic. The roadmap plans it for M6. Julien can tell from the first M3 test.

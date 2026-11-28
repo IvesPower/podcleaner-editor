@@ -12,7 +12,7 @@ A command-line tool that does the repetitive part of editing a podcast episode, 
 - **Silences**: shortens to about 0.4 s every silence longer than 1 s where all tracks are quiet, with a fade.
 - **Hesitations**: removes isolated "uh"s that don't break the sentence, and flags the others.
 - **Overlapping speech**: marks with a timecode each time someone tries to talk over the other person without taking the floor.
-- **Voice markers**: finds spoken instructions to Claude, a call at the start of a sentence, "dis Claude" or "Claude" followed by a comma or a pause (so a first name such as "Claude Chabrol" does not count), then an action word, such as "Dis Claude, on va couper ce passage-là" ("Claude, we'll cut this part") or "Claude, ajoute un extrait ici" ("Claude, add a clip here"), and removes the instruction itself from the audio.
+- **Voice markers**: finds spoken instructions to Claude, a call at the start of a sentence, "dis Claude" or "Claude" followed by a comma or a pause (so a first name such as "Claude Chabrol" does not count), then an action word, such as "Dis Claude, on va couper ce passage-là" ("Claude, we'll cut this part") or "Claude, ajoute un extrait ici" ("Claude, add a clip here"), and marks it; the instruction stays in the audio for you to cut by hand (`[markers] cut_instructions = true` cuts it).
 - **Film clips**: locates every clip played during the recording, from activity on the film track.
 - **Cut suggestions**: proposes passages to remove, with the reason (with Claude).
 
@@ -75,6 +75,8 @@ It also writes, in the same folder:
 - `Episode 42.film.wav`: the film track, cut at the same points, with no gate;
 - `Episode 42.mix.wav`: the stereo mix, with the markers written in it;
 - `Episode 42.markers.mid`: the markers alone, in a MIDI file.
+
+Each marker is named by its type only: `Requested cut`, `Clip to add`, `Film clip`, `Overlap`, or `Hesitation` for a "euh" that could not be cut. The reasons are in the edit file.
 
 A 2 h 10 episode weighs about 2.3 GB per track; the program checks the free disk space first, and an error leaves no half-written file.
 

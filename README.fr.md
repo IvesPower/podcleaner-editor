@@ -12,7 +12,7 @@ Un outil en ligne de commande qui fait le travail répétitif du montage d'un é
 - **Blancs** : raccourcit à environ 0,4 s tout silence de plus de 1 s où toutes les pistes se taisent, avec un fondu.
 - **Hésitations** : retire les « euh » isolés qui ne cassent pas la phrase, signale les autres.
 - **Paroles qui se chevauchent** : pose un timecode chaque fois qu'une personne tente de parler par-dessus l'autre sans prendre la parole.
-- **Marqueurs vocaux** : repère les consignes dites à voix haute à Claude, un appel en début de phrase, « dis Claude » ou « Claude » suivi d'une virgule ou d'une pause (pour qu'un prénom comme « Claude Chabrol » ne compte pas), puis un verbe d'action, comme « Dis Claude, on va couper ce passage-là » ou « Claude, ajoute un extrait ici », et retire la consigne elle-même de l'audio.
+- **Marqueurs vocaux** : repère les consignes dites à voix haute à Claude, un appel en début de phrase, « dis Claude » ou « Claude » suivi d'une virgule ou d'une pause (pour qu'un prénom comme « Claude Chabrol » ne compte pas), puis un verbe d'action, comme « Dis Claude, on va couper ce passage-là » ou « Claude, ajoute un extrait ici », et pose un marqueur ; la consigne reste dans l'audio, à couper à la main (`[markers] cut_instructions = true` la coupe).
 - **Extraits de film** : repère chaque passage diffusé pendant l'enregistrement, grâce à l'activité sur la piste film.
 - **Suggestions de coupe** : propose des passages à retirer, avec la raison (avec Claude).
 
@@ -75,6 +75,8 @@ La commande écrit aussi, dans le même dossier :
 - `Episode 42.film.wav` : la piste film, coupée aux mêmes endroits, sans porte ;
 - `Episode 42.mix.wav` : le mixage stéréo, avec les marqueurs inscrits dedans ;
 - `Episode 42.markers.mid` : les marqueurs seuls, dans un fichier MIDI.
+
+Chaque marqueur porte seulement son type : `Requested cut`, `Clip to add`, `Film clip`, `Overlap`, ou `Hesitation` pour un « euh » qui n'a pas pu être coupé. Les raisons sont dans le fichier de montage.
 
 Un épisode de 2 h 10 pèse environ 2,3 Go par piste ; le programme vérifie d'abord la place libre sur le disque, et une erreur ne laisse aucun fichier à moitié écrit.
 
