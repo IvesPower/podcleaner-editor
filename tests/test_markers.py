@@ -8,7 +8,8 @@ from podcleaner_editor.detect.markers import find_markers
 from podcleaner_editor.events import EventType
 from podcleaner_editor.timeline import Interval as I
 
-SETTINGS = Settings()
+# Most tests here check how an instruction is cut, which Julien turned off by default.
+SETTINGS = Settings(marker_cut_instructions=True)
 QUIET = np.full(20000, -60.0)
 
 
@@ -164,3 +165,11 @@ def test_mixed_layout_word_in_the_window_keeps_the_instruction():
     [m] = find_markers(words, "Julien + Franck", [], [], QUIET, SETTINGS)
     assert m.cut is None
     assert m.event.reason.endswith("; instruction kept: Other speech at the same time")
+
+
+def test_instruction_kept_in_audio_by_default():
+    text = "/ Dis Claude, on va couper ce passage -là. / alors"
+    words, [m] = _find(text, settings=Settings())
+    assert m.event.type == EventType.CUT_REQUEST
+    assert m.cut is None
+    assert m.event.reason == 'Spoken instruction: "Dis Claude, on va couper ce passage -là."'

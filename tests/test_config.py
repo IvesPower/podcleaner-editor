@@ -93,6 +93,13 @@ def test_wrong_type_raises(tmp_path):
         load_settings(path)
 
 
+@pytest.mark.parametrize("names", ['["Julien", "Julien"]', '["Julien", " julien "]'])
+def test_speakers_must_be_two_different_names(tmp_path, names):
+    path = _write(tmp_path / "c.toml", f"[recording]\nspeakers = {names}\n")
+    with pytest.raises(EditorError, match=r"\[recording\] speakers must be two different names"):
+        load_settings(path)
+
+
 def test_speakers_must_be_two_names(tmp_path):
     path = _write(tmp_path / "c.toml", '[recording]\nspeakers = ["Julien"]\n')
     with pytest.raises(EditorError, match="two"):
@@ -178,3 +185,16 @@ def test_marker_words_may_carry_accents_and_case(tmp_path):
 def test_template_round_trips_new_settings(tmp_path):
     path = _write(tmp_path / "c.toml", render_template(settings_values(Settings())))
     assert load_settings(path) == Settings()
+
+
+def test_gate_settings_read_from_toml(tmp_path):
+    path = _write(tmp_path / "c.toml", "[gate]\nthreshold_db = -35\nenabled = false\n")
+    s = load_settings(path)
+    assert s.gate_threshold_db == -35.0
+    assert s.gate_enabled is False
+
+
+def test_template_round_trips_gate_settings(tmp_path):
+    path = _write(tmp_path / "c.toml", render_template(settings_values(Settings())))
+    assert load_settings(path) == Settings()
+    assert "[gate]" in path.read_text(encoding="utf-8")

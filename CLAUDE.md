@@ -4,11 +4,11 @@ CLI Python qui fait le travail répétitif du montage d'un épisode de podcast :
 
 - Cahier des charges : `docs/spec.fr.md` (original, fait foi) · `docs/spec.md` (anglais)
 - Feuille de route : `docs/superpowers/plans/2026-11-05-roadmap.fr.md` (et `.md` en anglais)
-- Plan du jalon en cours : `docs/superpowers/plans/2026-11-05-m1-foundations-analysis.fr.md` (et `.md` en anglais)
+- Plan du jalon en cours : `docs/superpowers/plans/2026-11-24-m3-applied-edit.fr.md` (et `.md` en anglais), conception : `docs/superpowers/specs/2026-11-24-m3-applied-edit-design.fr.md`
 
 ## Commandes
 
-La CLI fait `init`, `config`, `run --dry-run` et `version` (fin du jalon M1) ; l'audio monté arrive avec M3.
+La CLI fait `init`, `config`, `run` et `version` ; `run` sans `--dry-run` écrit les pistes montées, le mixage et les marqueurs (jalon M3). Le son studio arrive avec M4.
 
 ```bash
 # Essai sur l'enregistrement de test (samples/pedit, lien local hors git)
@@ -52,7 +52,8 @@ Le hook `.claude/hooks/python_checks.py` lance Ruff et les tests rapides après 
 | Blancs | Tout silence > 1 s où toutes les pistes se taisent est ramené à ~0,4 s, avec un fondu |
 | Chevauchements | Timecode seul, aucune baisse de volume |
 | Son | Mixage à -16 LUFS et -1 dBTP ; banc d'essai contre les paires brut / Auphonic |
-| Sorties | Pistes coupées aux mêmes endroits, mixage stéréo, un seul fichier de montage `.md` (Timecodes + Report), marqueurs MIDI et dans le WAV du mixage |
+| Sorties | Pistes coupées aux mêmes endroits à l'échantillon près avec fondu enchaîné de 30 ms à chaque raccord (`<nom>.<voix>.wav`, `<nom>.film.wav`), mixage stéréo `<nom>.mix.wav` (somme, sans normalisation avant M4), un seul fichier de montage `.md` (Timecodes + Report), marqueurs MIDI (`<nom>.markers.mid`) et dans le WAV du mixage ; écriture sous nom temporaire puis renommage, place disque vérifiée |
+| Porte | Sur chaque piste de voix (pas le film), comme Strip Silence de Logic : -30 dB, 0,5 s, attaque 10 ms, relâchement 0,1 s (`[gate]`), décidée sur le niveau avec le test de repisse, calculée par `analyze()` ; valeurs non encore validées à l'oreille |
 | Analyses | Toujours sur l'audio original ; la carte des coupes recale les timecodes sur le final |
 | `--dry-run` | Rapport et timecodes, aucun audio écrit |
 
@@ -77,10 +78,10 @@ Le hook `.claude/hooks/python_checks.py` lance Ruff et les tests rapides après 
 | `[overlaps] merge_gap_s` | 0,5 s | Une pause de 0,3 s de Julien ne termine pas son tour |
 | `[levels] own_speech_gap_s` | 0,2 s | Le filtre de repisse, trame par trame, coupe entre les syllabes |
 | Bruit de fond | silence numérique exclu | Sinon plancher à -120 dB et chaque souffle compte comme un son fort |
-| Marqueurs vocaux (`[markers]`) | appel explicite en début de phrase : « dis Claude » (« dis » en début de phrase, une hésitation devant ne compte pas) ou « Claude » suivi d'une virgule ou d'une pause ; puis verbe d'action (`cut_words`, `clip_words`) ; `min_score` 80, `pause_s` 0,5 s, `max_s` 15 s mesuré depuis « dis » (au-delà, consigne gardée : « no clear end ») | Sur l'enregistrement de test, Julien donne des consignes parlées (« Dis Claude, on va couper ce passage-là… »), pas des phrases fixes ; règle choisie par Julien le 22 nov. 2026, appel explicite décidé le 23 nov. 2026 pour qu'un prénom (« Claude Chabrol ») ne compte pas |
+| Marqueurs vocaux (`[markers]`) | appel explicite en début de phrase : « dis Claude » (« dis » en début de phrase, une hésitation devant ne compte pas) ou « Claude » suivi d'une virgule ou d'une pause ; puis verbe d'action (`cut_words`, `clip_words`) ; `min_score` 80, `pause_s` 0,5 s, `max_s` 15 s mesuré depuis « dis » ; la consigne reste dans l'audio (`cut_instructions = false`), Julien la coupe lui-même ; marqueurs MIDI et WAV nommés par leur seul type (`Requested cut`, `Hesitation`…) | Sur l'enregistrement de test, Julien donne des consignes parlées (« Dis Claude, on va couper ce passage-là… »), pas des phrases fixes ; règle choisie par Julien le 22 nov. 2026, appel explicite décidé le 23 nov. 2026 pour qu'un prénom (« Claude Chabrol ») ne compte pas ; après écoute le 28 nov. 2026, couper la consigne rendait le passage incompréhensible |
 | Hésitations (`[hesitations]`) | valeurs par défaut | Les 6 « euh » trouvés sont tous ceux que Julien entend |
 
-Résultat attendu : 3 chevauchements (47,7 s, 50,2 s, 50,8 s), 1 extrait de film (62,3 – 67,4 s), 3 marqueurs (18,7 s Clip to add, 27,6 s Requested cut, 40,3 s Requested cut, consignes coupées), 3 « euh » coupés sur Julien (13,2 s, 26,9 s, 39,7 s) et 3 signalés sur Franck (48,0 s, 50,9 s, 51,3 s, parole de Julien en même temps), 4 blancs raccourcis (6,9 s retirées, hors parties déjà retirées avec les consignes et les « euh » : un blanc partagé par une consigne compte une fois, deux blancs tombent dans une coupe de parole ; 5 blancs et 6,8 s au M1) ; vérifié par les tests lents de `tests/test_pipeline.py`.
+Résultat attendu : 3 chevauchements (47,7 s, 50,2 s, 50,8 s), 1 extrait de film (62,3 – 67,4 s), 3 marqueurs (18,7 s Clip to add, 27,6 s Requested cut, 40,3 s Requested cut, consignes gardées dans l'audio), 3 « euh » coupés sur Julien (13,2 s, 26,9 s, 39,7 s) et 3 signalés sur Franck (48,0 s, 50,9 s, 51,3 s, parole de Julien en même temps, marqueurs `Hesitation`), 5 blancs raccourcis (6,8 s retirées) ; vérifié par les tests lents de `tests/test_pipeline.py`.
 
 ## Points de vigilance
 

@@ -2,7 +2,7 @@
 
 **Français** · [English](spec.md) — ce document est l'original et fait foi.
 
-Nov 5, 2026 · @Julien — révisé le 21 nov. 2026 (piste stéréo des deux voix, Claude par le compte intégré, interface de la CLI), révisé le 23 nov. 2026 (marqueurs vocaux : appel à Claude et verbe d'action)
+Nov 5, 2026 · @Julien — révisé le 21 nov. 2026 (piste stéréo des deux voix, Claude par le compte intégré, interface de la CLI), révisé le 23 nov. 2026 (marqueurs vocaux : appel à Claude et verbe d'action), révisé le 24 nov. 2026 (porte, sorties du montage), révisé le 28 nov. 2026 (consignes gardées dans l'audio, marqueurs simples)
 
 ## Contexte et objectif
 
@@ -15,10 +15,11 @@ L'outil tourne sur macOS et Windows et est publié en open source sur GitHub. Il
 | Fonctionnalité | Ce qu'elle fait | Outils open source | Apport de Claude |
 | --- | --- | --- | --- |
 | Son studio | Débruitage, réduction de la réverb, EQ, compression, de-esser sur chaque piste, puis mixage normalisé à -16 LUFS et -1 dBTP | ffmpeg, DeepFilterNet, nara\_wpe | Choisir les réglages à partir des mesures de chaque piste |
+| Porte | Sur chaque piste de voix, ramène au silence numérique les passages où la personne ne parle pas, comme Strip Silence de Logic Pro (-30 dB, 0,5 s, attaque 10 ms, relâchement 0,1 s). Décidée sur le niveau sonore, avec le test de repisse, pas sur la détection de parole : les rires et les respirations restent | Niveaux de l'analyse, numpy | Aucun |
 | Blancs | Raccourcit à environ 0,4 s tout silence de plus de 1 s où toutes les pistes se taisent, avec un fondu | Silero VAD par piste, ffmpeg | Aucun |
 | Hésitations | Retire les « euh » isolés qui ne cassent pas la phrase, signale les autres | faster-whisper ou mlx-whisper (timestamps par mot), piste par piste | Juger, phrase par phrase, si une coupe reste naturelle |
 | Paroles qui se chevauchent | Repère une personne qui tente de parler par-dessus une autre sans prendre la parole ; pose un timecode, le traitement se fait à la main. Seulement avec une piste par voix | Chevauchements détectés par VAD sur chaque piste | Écarter les relances (« oui », « mmh ») et les rires pour ne signaler que les vraies tentatives |
-| Marqueurs vocaux | Repère un appel à Claude en début de phrase (« dis Claude, … » ou « Claude, … ») suivi d'une consigne qui contient un verbe d'action : couper, supprimer… pour une coupe demandée ; ajouter, extrait… pour un extrait à ajouter. La consigne est retirée de l'audio | Whisper + règles sur les mots (rapidfuzz pour le déclencheur) | Reconnaître les variantes de formulation |
+| Marqueurs vocaux | Repère un appel à Claude en début de phrase (« dis Claude, … » ou « Claude, … ») suivi d'une consigne qui contient un verbe d'action : couper, supprimer… pour une coupe demandée ; ajouter, extrait… pour un extrait à ajouter. La consigne reste dans l'audio, avec un marqueur : c'est au montage à la main de la couper | Whisper + règles sur les mots (rapidfuzz pour le déclencheur) | Reconnaître les variantes de formulation |
 | Extraits de film | Repère chaque passage diffusé, grâce à l'activité sur la piste film | Détection d'activité sur la piste dédiée | Aucun |
 | Suggestions de coupe | Propose des passages à retirer, avec la raison | Aucun | Lecture de la transcription, guidée par des exemples tirés des épisodes déjà montés |
 
@@ -74,7 +75,7 @@ Points de vigilance, pour des épisodes d'environ 2 h 10 :
 
 ## Sorties produites
 
-- **Pistes finales** : une piste traitée par personne (ou la piste des voix, si elles arrivent mélangées) et la piste film, coupées aux mêmes endroits pour rester synchronisées, prêtes à glisser dans le logiciel de montage. Un mixage stéréo est aussi produit.
+- **Pistes finales** : une piste traitée par personne (ou la piste des voix, si elles arrivent mélangées) et la piste film, coupées aux mêmes endroits, à l'échantillon près, avec un fondu enchaîné à chaque raccord, pour rester synchronisées et prêtes à glisser dans le logiciel de montage. Chaque piste de voix passe d'abord par la porte. Un mixage stéréo (somme des pistes, sans normalisation avant M4) est aussi produit. Fichiers : `<nom>.<voix>.wav` (un par voix), `<nom>.film.wav`, `<nom>.mix.wav`, `<nom>.markers.mid`, avec `<nom>.edit.md`. Sans `--dry-run` seulement.
 - **Fichier de montage (.md)** : un seul fichier Markdown par épisode, en anglais, en deux parties.
   - Timecodes : chaque événement avec son type (coupe demandée, extrait à ajouter, extrait de film, chevauchement, suggestion), le timecode sur l'audio original et sur l'audio final, et la raison.
   - Rapport : les mesures avant et après (LUFS, true peak) par piste, le nombre de blancs et d'hésitations retirés, les « euh » signalés sans être coupés, et les avis rendus par Claude.

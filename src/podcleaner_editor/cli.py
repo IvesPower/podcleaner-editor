@@ -130,14 +130,10 @@ def run_command(
         bool, typer.Option("--dry-run", help="Write the edit file only, no audio.")
     ] = False,
 ) -> None:
-    """Analyse an episode and write its edit file."""
+    """Analyse an episode, then write its edited tracks, mix, markers and edit file."""
     banner.show(ctx)
     settings = config.load_settings(config.resolve_config_path(config_path))
     out_dir, episode_name = _output_dir(out, name, settings)
-    if not dry_run:
-        raise EditorError(
-            "Writing the edited audio comes in a later version; run again with --dry-run."
-        )
     require_ffmpeg()
     ep = load_episode(voices, film, episode_name, settings)
     if ep.layout != settings.layout:
@@ -145,8 +141,8 @@ def run_command(
             f"⚠ {len(voices)} voice file(s) given: treated as the {ep.layout} layout "
             f"(the configuration says {settings.layout})."
         )
-    path = pipeline.run(ep, settings, out_dir, progress=typer.echo)
-    typer.echo(f"Edit file written: {path}")
+    for path in pipeline.run(ep, settings, out_dir, dry_run=dry_run, progress=typer.echo):
+        typer.echo(f"Written: {path}")
 
 
 @app.command()

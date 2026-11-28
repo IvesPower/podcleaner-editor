@@ -115,7 +115,8 @@ def find_markers(
     levels: np.ndarray,
     settings: Settings,
 ) -> list[Marker]:
-    """Every instruction to Claude with an action word, cut unless something else is heard."""
+    """Every instruction to Claude with an action word; with `marker_cut_instructions`, cut
+    unless something else is heard."""
     markers = []
     ends = latest_ends(words)
     i = 0
@@ -162,6 +163,8 @@ def _marker(
     heard = " ".join(w.text.strip() for w in words[first : last + 1])
     reason = f'Spoken instruction: "{heard}"'
     span = Interval(words[first].start, words[last].end)
+    if not settings.marker_cut_instructions:
+        return Marker(Event(event_type, span.start, span.end, track, reason), None)
     window = word_cut_window(
         span,
         words[first - 1].end if first > 0 else None,

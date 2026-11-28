@@ -27,6 +27,11 @@ class Settings:
     silence_min_s: float = 1.0
     silence_target_s: float = 0.4
     fade_ms: int = 30
+    gate_enabled: bool = True
+    gate_threshold_db: float = -30.0
+    gate_min_silence_s: float = 0.5
+    gate_attack_s: float = 0.010
+    gate_release_s: float = 0.1
     vad_threshold: float = 0.5
     vad_min_speech_ms: int = 250
     vad_min_silence_ms: int = 100
@@ -63,6 +68,8 @@ class Settings:
     marker_min_score: float = 80.0
     marker_pause_s: float = 0.5
     marker_max_s: float = 15.0
+    # Julien keeps the instructions in the audio and cuts them himself (Nov 26, 2026).
+    marker_cut_instructions: bool = False
     marker_pad_s: float = 0.1
     # Overlap values tuned on the test recording (samples/pedit): the rule flags widely,
     # Claude (M5) is the one that sets backchannels aside.
@@ -86,6 +93,23 @@ _KEYS: dict[tuple[str, str], tuple[str, str]] = {
     ("silences", "min_s"): ("silence_min_s", "Silences longer than this (seconds) are shortened."),
     ("silences", "target_s"): ("silence_target_s", "Length a long silence is brought down to."),
     ("silences", "fade_ms"): ("fade_ms", "Fade applied on each side of a cut (milliseconds)."),
+    ("gate", "enabled"): (
+        "gate_enabled",
+        "Silence each voice between its sentences, like Logic's Strip Silence.",
+    ),
+    ("gate", "threshold_db"): ("gate_threshold_db", "A voice is heard above this level (dBFS)."),
+    ("gate", "min_silence_s"): (
+        "gate_min_silence_s",
+        "Shorter quiet moments stay open (seconds).",
+    ),
+    ("gate", "attack_s"): (
+        "gate_attack_s",
+        "The gate opens this long before the voice (seconds).",
+    ),
+    ("gate", "release_s"): (
+        "gate_release_s",
+        "The gate closes this long after the voice (seconds).",
+    ),
     ("vad", "threshold"): ("vad_threshold", "Speech detection threshold (0 to 1)."),
     ("vad", "min_speech_ms"): ("vad_min_speech_ms", "Shortest speech kept (milliseconds)."),
     ("vad", "min_silence_ms"): ("vad_min_silence_ms", "Shortest pause that splits speech."),
@@ -150,6 +174,10 @@ _KEYS: dict[tuple[str, str], tuple[str, str]] = {
         "A pause this long starts or ends an instruction (seconds).",
     ),
     ("markers", "max_s"): ("marker_max_s", "Longest instruction (seconds)."),
+    ("markers", "cut_instructions"): (
+        "marker_cut_instructions",
+        "Also cut the instruction itself from the audio (it is always marked).",
+    ),
     ("markers", "pad_s"): ("marker_pad_s", "Margin cut around an instruction (seconds)."),
     ("overlaps", "min_s"): ("overlap_min_s", "Shortest talk-over flagged (seconds)."),
     ("overlaps", "floor_hold_s"): (
@@ -237,7 +265,10 @@ def _convert(name: str, raw: Any, label: str) -> Any:
             or not all(isinstance(v, str) and v.strip() for v in raw)
         ):
             raise EditorError(f'{label} must list two names, such as ["Julien", "Marc"]')
-        return (raw[0].strip(), raw[1].strip())
+        first, second = raw[0].strip(), raw[1].strip()
+        if first.casefold() == second.casefold():
+            raise EditorError(f"{label} must be two different names")
+        return (first, second)
     if isinstance(default, tuple):
         if (
             not isinstance(raw, list)

@@ -3,6 +3,7 @@ import sys
 
 from typer.testing import CliRunner
 
+from podcleaner_editor import pipeline
 from podcleaner_editor.cli import app
 
 
@@ -50,3 +51,18 @@ def test_unknown_command_is_a_usage_error_without_traceback():
     assert proc.returncode == 2
     assert "nope" in proc.stderr
     assert "Traceback" not in proc.stdout + proc.stderr
+
+
+def test_cli_run_without_dry_run(make_wav, tmp_path, monkeypatch):
+    a = make_wav(tmp_path / "a.wav", seconds=5, sr=8000, signal="tone")
+    b = make_wav(tmp_path / "b.wav", seconds=5, sr=8000, signal="tone")
+    film = make_wav(tmp_path / "film.wav", seconds=5, sr=8000)
+    monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, settings: [])
+    out = tmp_path / "ep"
+    args = ["run", "--voice", a, "--voice", b, "--film", film, "--out", out]
+    result = CliRunner().invoke(app, [str(arg) for arg in args])
+    assert result.exit_code == 0, result.output
+    assert result.output.count("Written: ") >= 4
+    for name in ("ep.edit.md", "ep.mix.wav", "ep.film.wav", "ep.markers.mid"):
+        assert f"Written: {out / name}" in result.output
+    assert "Writing the edited tracks…" in result.output
