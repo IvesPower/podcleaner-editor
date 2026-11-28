@@ -48,9 +48,9 @@ class IdentityDenoiser:
     """A denoiser that leaves the audio as it is, counting its calls."""
 
     name = "identity"
-    rate = 8000
 
-    def __init__(self) -> None:
+    def __init__(self, rate: int = 8000) -> None:
+        self.rate = rate
         self.calls = 0
 
     def __call__(self, mono: np.ndarray) -> np.ndarray:

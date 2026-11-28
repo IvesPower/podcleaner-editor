@@ -347,7 +347,8 @@ def _process_voices(
             denoiser = denoiser or make_denoiser()
             denoise_file(source, denoised, denoiser)
             apply_filters(denoised, target, settings.sound_filters)
-            denoised.unlink()
+            with contextlib.suppress(OSError):  # else left to the caller's cleanup
+                denoised.unlink(missing_ok=True)
         else:
             apply_filters(source, target, settings.sound_filters)
         processed[track.label] = target
@@ -424,6 +425,8 @@ def _render_with_sound(
         except (OSError, sf.SoundFileError) as exc:
             raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
         progress("Measuring the loudness…")
+        # Before the write: once the audio is written, only its own measures remain.
+        befores = [measure([path]) for path in raw] + [measure(raw)]
         voices = [processed[t.label] for t in episode.voices]
         gain, capped = shared_gain(
             measure([*voices, episode.film.info.path]),
@@ -437,7 +440,7 @@ def _render_with_sound(
                 path.unlink(missing_ok=True)
 
     written = outputs[: len(raw) + 1]  # every track, then the mix
-    befores = [measure([path]) for path in raw] + [measure(raw)]
+    progress("Measuring the loudness of the written files…")
     rows = tuple(
         (path.name, before, measure([path])) for path, before in zip(written, befores, strict=True)
     )

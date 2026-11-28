@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile as sf
+from conftest import IdentityDenoiser
 from typer.testing import CliRunner
 
 from podcleaner_editor import pipeline
@@ -551,7 +552,7 @@ def test_markers_match_events_and_flagged_fillers(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "make_transcriber", lambda settings: fake)
     monkeypatch.setattr(pipeline, "decode_mono_16k", fake.decode)
     monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, settings: [I(15, 45)])
-    settings = replace(SETTINGS, passage_gap_s=20.0)
+    settings = replace(SETTINGS, passage_gap_s=20.0, sound_enabled=False)  # markers only
     out = tmp_path / "out"
     pipeline.run(load_episode([voices], film, "ep", settings), settings, out, dry_run=False)
 
@@ -659,18 +660,6 @@ def test_run_reports_a_track_that_cannot_be_opened(tmp_path):
         pipeline.run(episode, SETTINGS, tmp_path / "out", dry_run=False)
 
 
-class _Identity:
-    name = "identity"
-    rate = RATE
-
-    def __init__(self):
-        self.calls = 0
-
-    def __call__(self, mono):
-        self.calls += 1
-        return mono
-
-
 class _RaisingDenoiser:
     name = "raising"
     rate = 8000
@@ -713,12 +702,22 @@ def test_run_processes_the_voices_not_the_film(tmp_path, monkeypatch):
 
     def write(tracks, *args, **kwargs):
         written.append((tracks, kwargs["gain_db"]))
+        steps.append("write")
         return real_write(tracks, *args, **kwargs)
+
+    steps = []
+    real_measure = pipeline.measure
+
+    def measuring(paths):
+        steps.append(sorted(p.name for p in paths))
+        return real_measure(paths)
+
+    monkeypatch.setattr(pipeline, "measure", measuring)
 
     made = []
 
     def make():
-        made.append(_Identity())
+        made.append(IdentityDenoiser(RATE))
         return made[-1]
 
     monkeypatch.setattr(pipeline, "denoise_file", denoise)
@@ -734,12 +733,24 @@ def test_run_processes_the_voices_not_the_film(tmp_path, monkeypatch):
     assert [t.source.name for t in tracks] == [*filtered, "film.wav"]
     assert [t.subtype for t in tracks[:2]] == ["PCM_16", "PCM_16"]
     assert gain != 0.0
+    raw = ["film.wav", "franck.wav", "julien.wav"]
+    after = [["ep.julien.wav"], ["ep.franck.wav"], ["ep.film.wav"], ["ep.mix.wav"]]
+    assert steps == [
+        ["julien.wav"],
+        ["franck.wav"],
+        ["film.wav"],
+        raw,  # every raw measure before the write
+        [".ep.franck.sound.tmp.wav", ".ep.julien.sound.tmp.wav", "film.wav"],
+        "write",
+        *after,
+    ]
     assert [p.name for p in out.iterdir() if ".tmp" in p.name] == []
     assert [m for m in messages if "sound" in m or "loudness" in m or "Writing" in m] == [
         "Processing the sound of Julien… (the DeepFilterNet model is downloaded on first use)",
         "Processing the sound of Franck…",
         "Measuring the loudness…",
         "Writing the edited tracks…",
+        "Measuring the loudness of the written files…",
     ]
     # The film is only scaled by the shared gain.
     film, _ = sf.read(tmp_path / "film.wav", dtype="float32")
@@ -798,6 +809,8 @@ def test_sound_section_in_edit_file(tmp_path, monkeypatch):
     after_mix = measure([out / "ep.mix.wav"])
     assert rows[3].endswith(f"| {after_mix.lufs:.1f} LUFS / {after_mix.true_peak_db:.1f} dBTP |")
 
+
+def test_sound_section_names_the_filters_only_chain(tmp_path, monkeypatch):
     plain = replace(SETTINGS, sound_denoise=False)
     out = _sound_run(tmp_path, monkeypatch, plain, denoiser=_RaisingDenoiser())
     text = (out / "ep.edit.md").read_text(encoding="utf-8")
