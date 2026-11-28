@@ -4,11 +4,11 @@ CLI Python qui fait le travail répétitif du montage d'un épisode de podcast :
 
 - Cahier des charges : `docs/spec.fr.md` (original, fait foi) · `docs/spec.md` (anglais)
 - Feuille de route : `docs/superpowers/plans/2026-11-05-roadmap.fr.md` (et `.md` en anglais)
-- Plan du jalon en cours : `docs/superpowers/plans/2026-11-24-m3-applied-edit.fr.md` (et `.md` en anglais), conception : `docs/superpowers/specs/2026-11-24-m3-applied-edit-design.fr.md`
+- Plan du jalon en cours : `docs/superpowers/plans/2026-11-28-m4-studio-sound.fr.md` (et `.md` en anglais), conception : `docs/superpowers/specs/2026-11-28-m4-studio-sound-design.fr.md`
 
 ## Commandes
 
-La CLI fait `init`, `config`, `run` et `version` ; `run` sans `--dry-run` écrit les pistes montées, le mixage et les marqueurs (jalon M3). Le son studio arrive avec M4.
+La CLI fait `init`, `config`, `run` et `version` ; `run` sans `--dry-run` écrit les pistes montées, le mixage et les marqueurs (jalon M3) et le son studio des voix (jalon M4 : DeepFilterNet 3, filtres ffmpeg, un gain commun) ; `--dry-run` ne traite pas le son. Python 3.11 seulement.
 
 ```bash
 # Essai sur l'enregistrement de test (samples/pedit, lien local hors git)
@@ -51,8 +51,8 @@ Le hook `.claude/hooks/python_checks.py` lance Ruff et les tests rapides après 
 | Durée des épisodes | Environ 2 h 10 : analyse sur une copie mono 16 kHz, jamais l'audio pleine résolution en mémoire |
 | Blancs | Tout silence > 1 s où toutes les pistes se taisent est ramené à ~0,4 s, avec un fondu |
 | Chevauchements | Timecode seul, aucune baisse de volume |
-| Son | Mixage à -16 LUFS et -1 dBTP ; banc d'essai contre les paires brut / Auphonic |
-| Sorties | Pistes coupées aux mêmes endroits à l'échantillon près avec fondu enchaîné de 30 ms à chaque raccord (`<nom>.<voix>.wav`, `<nom>.film.wav`), mixage stéréo `<nom>.mix.wav` (somme, sans normalisation avant M4), un seul fichier de montage `.md` (Timecodes + Report), marqueurs MIDI (`<nom>.markers.mid`) et dans le WAV du mixage ; écriture sous nom temporaire puis renommage, place disque vérifiée |
+| Son | Par piste de voix : DeepFilterNet 3 (bruit et réverb) puis filtres ffmpeg (passe-haut, EQ, compresseur, `[sound] filters`) ; un seul gain commun à toutes les pistes et au mixage, à -16 LUFS et -1 dBTP (abaissé si le pic réel l'exige, le fichier de montage le dit) ; section `### Sound` avec les mesures avant/après ; WPE écarté ; Python 3.11 seulement (DeepFilterNet) ; banc d'essai contre une seule paire brut / Auphonic pour l'instant |
+| Sorties | Pistes coupées aux mêmes endroits à l'échantillon près avec fondu enchaîné de 30 ms à chaque raccord (`<nom>.<voix>.wav`, `<nom>.film.wav`), mixage stéréo `<nom>.mix.wav` (somme des pistes au gain commun), un seul fichier de montage `.md` (Timecodes + Report), marqueurs MIDI (`<nom>.markers.mid`) et dans le WAV du mixage ; écriture sous nom temporaire puis renommage, place disque vérifiée |
 | Porte | Sur chaque piste de voix (pas le film), comme Strip Silence de Logic : -30 dB, 0,5 s, attaque 10 ms, relâchement 0,1 s (`[gate]`), décidée sur le niveau avec le test de repisse, calculée par `analyze()` ; valeurs non encore validées à l'oreille |
 | Analyses | Toujours sur l'audio original ; la carte des coupes recale les timecodes sur le final |
 | `--dry-run` | Rapport et timecodes, aucun audio écrit |

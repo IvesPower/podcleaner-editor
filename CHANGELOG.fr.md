@@ -8,6 +8,8 @@ Tous les changements notables de podcleaner-editor. Les versions suivent le [ver
 
 ### Ajouts
 
+- Son studio dans `pedit run` : chaque piste de voix passe par DeepFilterNet 3 (bruit et réverb), puis par des filtres ffmpeg (passe-haut, EQ, compresseur), et un seul gain commun à toutes les pistes et au mixage amène le mixage à -16 LUFS sans dépasser -1 dBTP. Le fichier de montage a une section `### Sound` (chaîne, gain, volume et pic réel de chaque fichier avant et après). La section `[sound]` de la configuration la règle (`enabled`, `denoise`, `filters`, `target_lufs`, `true_peak_db`). Le modèle DeepFilterNet est téléchargé au premier lancement.
+- Un test lent sur l'enregistrement de test : volume et pic réel du mixage, et équilibre des bandes face à la version Auphonic.
 - `pedit run` sans `--dry-run` écrit l'audio monté : une piste par voix (ou la piste des voix mélangées) et la piste film, coupées aux mêmes échantillons avec un fondu enchaîné à puissance constante (30 ms) à chaque raccord, un mixage stéréo, et les marqueurs dans un fichier MIDI et dans le WAV du mixage, chacun nommé par son seul type (`Requested cut`, `Clip to add`, `Film clip`, `Overlap`, `Hesitation` pour un « euh » qui n'a pas pu être coupé). Le fichier de montage liste les fichiers écrits et ses timecodes « Final » tombent sur l'audio.
 - Une porte sur chaque piste de voix, comme Strip Silence de Logic Pro (-30 dB, 0,5 s, attaque 10 ms, relâchement 0,1 s), décidée sur le niveau sonore avec le test de repisse ; la section `[gate]` de la configuration la règle ou la coupe.
 - Écriture sûre : les fichiers sont écrits sous un nom temporaire puis renommés, jamais laissés à moitié écrits après une erreur ; la place sur le disque est vérifiée d'abord, et des pistes de fréquences différentes ou de plus de 2 canaux arrêtent la commande avec une erreur claire.
@@ -20,3 +22,7 @@ Tous les changements notables de podcleaner-editor. Les versions suivent le [ver
 - Titre en pixel art aux couleurs du podcast au lancement de l'outil dans un terminal.
 - Cahier des charges, feuille de route et plans des jalons 1 et 2, en anglais et en français.
 - Règles du dépôt : `main` protégée, pull requests approuvées par le mainteneur, Conventional Commits en anglais puis en français.
+
+### Modifié
+
+- Python 3.11 seulement (`>=3.11,<3.12`) : DeepFilterNet n'a pas de paquet pour 3.12 sur Mac Apple silicon. La CI ne teste plus 3.12.

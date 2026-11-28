@@ -2,7 +2,7 @@
 
 [Français](spec.fr.md) · **English** — translated from the French original, which remains the reference.
 
-Nov 5, 2026 · @Julien — revised Nov 21, 2026 (stereo track with both voices, Claude through the built-in account, CLI interface), revised Nov 23, 2026 (voice markers: call to Claude and action verb), revised Nov 24, 2026 (gate, edit outputs), revised Nov 28, 2026 (instructions kept in the audio, plain markers)
+Nov 5, 2026 · @Julien — revised Nov 21, 2026 (stereo track with both voices, Claude through the built-in account, CLI interface), revised Nov 23, 2026 (voice markers: call to Claude and action verb), revised Nov 24, 2026 (gate, edit outputs), revised Nov 28, 2026 (instructions kept in the audio, plain markers), revised Nov 28, 2026 (studio sound: DeepFilterNet 3 and ffmpeg filters, WPE set aside)
 
 ## Context and goal
 
@@ -14,7 +14,7 @@ The tool runs on macOS and Windows and is published as open source on GitHub. It
 
 | Feature | What it does | Open source tools | What Claude adds |
 | --- | --- | --- | --- |
-| Studio sound | Noise reduction, de-reverb, EQ, compression, de-esser on each track, then a mix normalised to -16 LUFS and -1 dBTP | ffmpeg, DeepFilterNet, nara\_wpe | Choosing the settings from each track's measurements |
+| Studio sound | DeepFilterNet 3 (noise and reverb) then ffmpeg filters (high-pass, EQ, compressor) on each voice track, then one shared gain on every track and the mix, to -16 LUFS and -1 dBTP. WPE (`nara_wpe`) was tried and set aside: it changes almost nothing on these recordings | ffmpeg, DeepFilterNet | Choosing the settings from each track's measurements |
 | Gate | On each voice track, brings the passages where the person is not speaking down to digital silence, like Logic Pro's Strip Silence (-30 dB, 0.5 s, 10 ms attack, 0.1 s release). Decided on sound level, with the bleed test, not on speech detection: laughs and breaths stay | Levels from the analysis, numpy | None |
 | Silences | Shortens to about 0.4 s every silence longer than 1 s where all tracks are quiet, with a fade | Silero VAD per track, ffmpeg | None |
 | Hesitations | Removes isolated "uh"s that don't break the sentence, flags the others | faster-whisper or mlx-whisper (word timestamps), track by track | Judging, sentence by sentence, whether a cut still sounds natural |
@@ -75,7 +75,7 @@ Points to watch, for episodes of about 2 h 10:
 
 ## Outputs
 
-- **Final tracks**: one processed track per person (or the voices track, when they come mixed) and the film track, cut at the same points, to the sample, with a crossfade at every join, to stay in sync and ready to drop into the editing software. Each voice track goes through the gate first. A stereo mix (sum of the tracks, not normalised before M4) is also produced. Files: `<name>.<voice>.wav` (one per voice), `<name>.film.wav`, `<name>.mix.wav`, `<name>.markers.mid`, next to `<name>.edit.md`. Without `--dry-run` only.
+- **Final tracks**: one processed track per person (or the voices track, when they come mixed) and the film track, cut at the same points, to the sample, with a crossfade at every join, to stay in sync and ready to drop into the editing software. Each voice track goes through the gate first. A stereo mix (sum of the tracks) is also produced; the voices go through the studio sound first, and every track and the mix share one gain. Files: `<name>.<voice>.wav` (one per voice), `<name>.film.wav`, `<name>.mix.wav`, `<name>.markers.mid`, next to `<name>.edit.md`. Without `--dry-run` only.
 - **Edit file (.md)**: a single Markdown file per episode, in English, in two parts.
   - Timecodes: each event with its type (requested cut, clip to add, film clip, overlap, suggestion), the timecode on the original audio and on the final audio, and the reason.
   - Report: measurements before and after (LUFS, true peak) per track, the number of silences and hesitations removed, the "uh"s flagged but not cut, and the opinions Claude gave.
