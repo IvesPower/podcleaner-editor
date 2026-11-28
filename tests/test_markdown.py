@@ -1,6 +1,8 @@
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from podcleaner_editor.analysis.transcribe import TranscriptionInfo
 from podcleaner_editor.analysis.words import Word
 from podcleaner_editor.audio_io import AudioInfo
@@ -9,6 +11,7 @@ from podcleaner_editor.detect.fillers import Filler
 from podcleaner_editor.episode import Episode, Track
 from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.report.markdown import AnalysisResult, SoundInfo, render_edit_file
+from podcleaner_editor.sound.limiter import LimiterReport
 from podcleaner_editor.sound.loudness import Loudness
 from podcleaner_editor.timeline import Interval as I
 
@@ -245,19 +248,37 @@ def test_sound_section_when_the_true_peak_holds_the_gain():
         ),
         -16.0,
         -1.0,
+        LimiterReport(3, 0.42, -4.26),
     )
     result = AnalysisResult(SEPARATE, [], CutMap(()), False, sound=sound)
     text = render_edit_file(result, "0.1.0", DAY)
     assert (
         "### Sound\n\n"
         "filters only · film -5.4 dB · gain +4.2 dB · target -16.0 LUFS. "
-        "Target not reached: true peak held at -1.0 dBTP.\n\n"
+        "Target not reached: true peak held at -1.0 dBTP. "
+        "Limiter: 3 passages, 0.4 s reduced, deepest -4.3 dB.\n\n"
         "| File | Before | After |\n"
         "| --- | --- | --- |\n"
         "| ep.julien.wav | -30.0 LUFS / -12.0 dBTP | -25.8 LUFS / -7.8 dBTP |\n"
         "| ep.mix.wav | -24.0 LUFS / -5.0 dBTP | -19.8 LUFS / -1.0 dBTP |\n"
         "\n### Silences"
     ) in text
+
+
+@pytest.mark.parametrize(
+    ("report", "sentence"),
+    [
+        (LimiterReport(0, 0.0, 0.0), "Limiter: no reduction."),
+        (LimiterReport(1, 0.004, -0.04), "Limiter: 1 passage, 0.0 s reduced, deepest -0.0 dB."),
+    ],
+)
+def test_sound_section_limiter_sentence(report, sentence):
+    sound = SoundInfo("filters only", 0.0, 2.0, False, (), -16.0, -1.0, report)
+    text = render_edit_file(
+        AnalysisResult(SEPARATE, [], CutMap(()), False, sound=sound), "0.1.0", DAY
+    )
+    head = text.split("### Sound\n\n", 1)[1].split("\n", 1)[0]
+    assert head == f"filters only · film +0.0 dB · gain +2.0 dB · target -16.0 LUFS. {sentence}"
 
 
 def test_sound_section_when_not_processed():

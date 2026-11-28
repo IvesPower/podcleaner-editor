@@ -258,6 +258,9 @@ def load_settings(path: Path) -> Settings:
             name = _KEYS[(section, key)][0]
             label = f"{path}: [{section}] {key}"
             values[name] = _convert(name, raw, label)
+            if name == "sound_true_peak_db" and not -20.0 <= values[name] <= 0.0:
+                # The limiter's level, 0.5 dB under it, must stay within what alimiter takes.
+                raise EditorError(f"{label} must be between -20.0 and 0.0 dBTP")
             if name in _SINGLE_WORDS:
                 _check_single_words(values[name], label)
     return Settings(**values)

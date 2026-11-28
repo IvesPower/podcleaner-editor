@@ -10,6 +10,7 @@ from podcleaner_editor.cutmap import CutMap
 from podcleaner_editor.detect.fillers import Filler
 from podcleaner_editor.episode import Episode
 from podcleaner_editor.events import Event, EventType
+from podcleaner_editor.sound.limiter import LimiterReport
 from podcleaner_editor.sound.loudness import Loudness
 from podcleaner_editor.timeline import Interval, format_tc, merge
 
@@ -20,8 +21,8 @@ _LEFT_OUT_MIN_S = 0.001
 
 @dataclass(frozen=True)
 class SoundInfo:
-    """What the studio sound did: the chain, the film's own gain, the shared gain and each
-    file's loudness.
+    """What the studio sound did: the chain, the film's own gain, the shared gain, what the
+    linked limiter lowered and each file's loudness.
 
     Each row is (file name, loudness of its raw source, loudness of the written file); the
     mix's raw source is the sum of the raw tracks.
@@ -34,6 +35,7 @@ class SoundInfo:
     rows: tuple[tuple[str, Loudness, Loudness], ...]
     target_lufs: float
     true_peak_db: float
+    limiter: LimiterReport = LimiterReport(0, 0.0, 0.0)
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,15 @@ def _level(loudness: Loudness) -> str:
     return f"{loudness.lufs:.1f} LUFS / {loudness.true_peak_db:.1f} dBTP"
 
 
+def _limiter(report: LimiterReport) -> str:
+    if report.passages == 0:
+        return "Limiter: no reduction."
+    return (
+        f"Limiter: {_plural(report.passages, 'passage')}, {report.reduced_s:.1f} s reduced, "
+        f"deepest {report.deepest_db:.1f} dB."
+    )
+
+
 def _sound(result: AnalysisResult) -> list[str]:
     if result.dry_run:
         return ["None: dry run, no audio written."]
@@ -142,6 +153,7 @@ def _sound(result: AnalysisResult) -> list[str]:
     )
     if sound.capped:
         head += f" Target not reached: true peak held at {sound.true_peak_db:.1f} dBTP."
+    head += f" {_limiter(sound.limiter)}"
     lines = [head, "", "| File | Before | After |", "| --- | --- | --- |"]
     for name, before, after in sound.rows:
         lines.append(f"| {_cell(name)} | {_level(before)} | {_level(after)} |")

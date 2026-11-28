@@ -93,6 +93,21 @@ def test_wrong_type_raises(tmp_path):
         load_settings(path)
 
 
+@pytest.mark.parametrize("value", ["0.5", "-20.5", "-40"])
+def test_true_peak_out_of_range_raises(tmp_path, value):
+    path = _write(tmp_path / "c.toml", f"[sound]\ntrue_peak_db = {value}\n")
+    with pytest.raises(
+        EditorError, match=r"\[sound\] true_peak_db must be between -20\.0 and 0\.0 dBTP"
+    ):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("value", ["0.0", "-20.0", "-1.0"])
+def test_true_peak_in_range_loads(tmp_path, value):
+    path = _write(tmp_path / "c.toml", f"[sound]\ntrue_peak_db = {value}\n")
+    assert load_settings(path).sound_true_peak_db == float(value)
+
+
 @pytest.mark.parametrize("names", ['["Julien", "Julien"]', '["Julien", " julien "]'])
 def test_speakers_must_be_two_different_names(tmp_path, names):
     path = _write(tmp_path / "c.toml", f"[recording]\nspeakers = {names}\n")

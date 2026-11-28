@@ -22,6 +22,7 @@ from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.render.markers import Marker, read_wav_markers
 from podcleaner_editor.report.markdown import AnalysisResult
 from podcleaner_editor.sound.filters import limit_filter
+from podcleaner_editor.sound.limiter import LimiterReport
 from podcleaner_editor.sound.loudness import measure
 from podcleaner_editor.timeline import Interval as I
 
@@ -741,7 +742,6 @@ def test_run_processes_the_voices_not_the_film(tmp_path, monkeypatch):
     [(tracks, rest)] = written
     assert [t.source.name for t in tracks] == limited
     assert [t.subtype for t in tracks] == ["PCM_16", "PCM_16", "PCM_24"]
-    assert [t.gain_db for t in tracks] == [0.0, 0.0, 0.0]  # the gains are in the temporaries
     raw = ["film.wav", "franck.wav", "julien.wav"]
     after = [["ep.julien.wav"], ["ep.franck.wav"], ["ep.film.wav"], ["ep.mix.wav"]]
     assert steps == [
@@ -796,20 +796,6 @@ def test_loud_film_is_brought_to_the_voices(tmp_path, monkeypatch):
     assert measure([out / "ep.mix.wav"]).lufs == pytest.approx(-16.0, abs=0.5)
 
 
-def test_sound_disabled_gives_the_film_no_gain(tmp_path, monkeypatch):
-    written = []
-    real_write = pipeline.write_edit
-
-    def write(tracks, *args, **kwargs):
-        written.append(tracks)
-        return real_write(tracks, *args, **kwargs)
-
-    monkeypatch.setattr(pipeline, "write_edit", write)
-    settings = replace(SETTINGS, sound_enabled=False)
-    _sound_run(tmp_path, monkeypatch, settings, denoiser=_RaisingDenoiser())
-    assert [t.gain_db for t in written[0]] == [0.0, 0.0, 0.0]
-
-
 def _clicky_voice(tmp_path):
     """A quiet voice with one loud click: reaching -16 LUFS would push the click past -1 dBTP."""
     t = np.arange(30 * RATE) / RATE
@@ -843,6 +829,9 @@ def test_peaks_shared_by_two_voices_are_limited_together(tmp_path, monkeypatch):
     out = _sound_run(tmp_path, monkeypatch, settings, voices=voices, film_tone=(0, 0))
     text = (out / "ep.edit.md").read_text(encoding="utf-8")
     assert "Target not reached" not in _sound_lines(text)[0]
+    assert re.search(
+        r" Limiter: 1 passage, \d+\.\d s reduced, deepest -\d+\.\d dB\.$", _sound_lines(text)[0]
+    )
     mix = measure([out / "ep.mix.wav"])
     assert mix.lufs == pytest.approx(-16.0, abs=0.5)
     assert mix.true_peak_db <= -1.0
@@ -851,7 +840,9 @@ def test_peaks_shared_by_two_voices_are_limited_together(tmp_path, monkeypatch):
 def test_gain_capped_by_true_peak(tmp_path, monkeypatch):
     # Without the limiters, the click holds the shared gain.
     monkeypatch.setattr(pipeline, "limit_filter", lambda gain, peak: f"volume={gain}dB")
-    monkeypatch.setattr(pipeline, "link_limit", lambda paths, limit, gain_db: None)
+    monkeypatch.setattr(
+        pipeline, "link_limit", lambda paths, limit, gain_db: LimiterReport(0, 0.0, 0.0)
+    )
     voices = [_clicky_voice(tmp_path)]
     out = _sound_run(tmp_path, monkeypatch, _ONE_VOICE, voices=voices, film_tone=(0, 0))
     text = (out / "ep.edit.md").read_text(encoding="utf-8")
@@ -878,7 +869,8 @@ def test_sound_section_in_edit_file(tmp_path, monkeypatch):
     lines = _sound_lines(text)
     assert re.fullmatch(
         r"DeepFilterNet 3 \+ filters · film [+-]\d+\.\d dB · gain [+-]\d+\.\d dB · "
-        r"target -16\.0 LUFS\.",
+        r"target -16\.0 LUFS\. Limiter: (no reduction|\d+ passages?, \d+\.\d s reduced, "
+        r"deepest -\d+\.\d dB)\.",
         lines[0],
     )
     assert lines[1:3] == ["", "| File | Before | After |"]

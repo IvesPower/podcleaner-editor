@@ -477,7 +477,9 @@ def _render_with_sound(
             # tracks as one where they peak together.
             level = measure([*limited, film])
             made_up = settings.sound_target_lufs - level.lufs if level.lufs > SILENCE_LUFS else 0.0
-            link_limit([*limited, film], limit_level(settings.sound_true_peak_db), made_up)
+            limiter = link_limit(
+                [*limited, film], limit_level(settings.sound_true_peak_db), made_up
+            )
         except (OSError, sf.SoundFileError) as exc:
             raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
         # What is left is small, and still held by the true peak.
@@ -507,6 +509,7 @@ def _render_with_sound(
         rows,
         settings.sound_target_lufs,
         settings.sound_true_peak_db,
+        limiter,
     )
     return outputs, info
 

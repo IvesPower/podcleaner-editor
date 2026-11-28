@@ -1,7 +1,13 @@
+import math
+from pathlib import Path
+
 import numpy as np
+import pytest
 import soundfile as sf
 
-from podcleaner_editor.sound.limiter import link_limit
+from podcleaner_editor.errors import EditorError
+from podcleaner_editor.sound import limiter
+from podcleaner_editor.sound.limiter import LimiterReport, link_limit
 
 RATE = 8000
 
@@ -26,7 +32,10 @@ def test_the_sum_is_held_under_the_limit(tmp_path):
     a[RATE : RATE + 400] *= 2.5  # both peaks together: 1.5 in the sum
     b[RATE : RATE + 400] *= 2.5
     paths = [_write(tmp_path / "a.wav", a), _write(tmp_path / "b.wav", b)]
-    link_limit(paths, 0.8, block_s=0.5)
+    report = link_limit(paths, 0.8, block_s=0.5)
+    assert report.passages == 1
+    assert 400 / RATE <= report.reduced_s < 600 / RATE
+    assert report.deepest_db == pytest.approx(20 * math.log10(0.8 / 1.5), abs=0.05)
     out_a, out_b = _read(paths[0])[:, 0], _read(paths[1])[:, 0]
     assert np.max(np.abs(out_a + out_b)) <= 0.8 + 1e-6
     # One shared gain: the tracks keep their ratio everywhere.
@@ -53,8 +62,9 @@ def test_quiet_files_are_left_alone(tmp_path):
     a = _tone(RATE, 0.2)
     path = _write(tmp_path / "a.wav", a)
     before = path.read_bytes()
-    link_limit([path, _write(tmp_path / "b.wav", a)], 0.8)
+    report = link_limit([path, _write(tmp_path / "b.wav", a)], 0.8)
     assert path.read_bytes() == before
+    assert report == LimiterReport(0, 0.0, 0.0)
 
 
 def test_files_of_different_lengths(tmp_path):
@@ -91,3 +101,49 @@ def test_a_gain_is_applied_before_limiting(tmp_path):
     assert np.max(np.abs(out)) <= 0.8 + 1e-6
     np.testing.assert_allclose(out[:3800], 2 * x[:3800], atol=1e-5)
     np.testing.assert_allclose(out[4300:], 2 * x[4300:], atol=1e-5)
+
+
+def test_passages_across_blocks_count_once(tmp_path):
+    x = _tone(2 * RATE, 0.3)
+    x[1900:2100] *= 3.0  # one passage across the 0.25 s block edge at frame 2000
+    x[6000:6100] *= 3.0
+    path = _write(tmp_path / "a.wav", x)
+    assert link_limit([path], 0.8, block_s=0.25).passages == 2
+
+
+@pytest.mark.parametrize("step", ["_peaks", "_envelope"])
+def test_an_error_leaves_every_file_closed(tmp_path, monkeypatch, step):
+    x = _tone(RATE, 0.3)
+    x[4000:4100] *= 3.0
+    paths = [_write(tmp_path / "a.wav", x), _write(tmp_path / "b.wav", x)]
+    opened = []
+    real_open = Path.open
+
+    def tracking(self, *args, **kwargs):
+        opened.append(real_open(self, *args, **kwargs))
+        return opened[-1]
+
+    calls = []
+    real_step = getattr(limiter, step)
+
+    def failing(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        return real_step(*args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", tracking)
+    monkeypatch.setattr(limiter, step, failing)
+    with pytest.raises(KeyboardInterrupt):
+        link_limit(paths, 0.8, gain_db=1.0, block_s=0.25)
+    assert opened and all(f.closed for f in opened)
+    for path in paths:
+        path.rename(path.with_suffix(".moved"))
+        path.with_suffix(".moved").unlink()
+
+
+def test_an_unexpected_temporary_is_an_editor_error(tmp_path):
+    path = tmp_path / "a.wav"
+    sf.write(path, _tone(RATE, 0.3), RATE, subtype="PCM_16")
+    with pytest.raises(EditorError, match="a.wav is not a 32-bit float WAV file"):
+        link_limit([path], 0.8)

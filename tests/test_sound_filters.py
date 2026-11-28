@@ -55,3 +55,17 @@ def test_limit_filter_holds_the_peaks_and_keeps_the_timing(tmp_path):
     assert float(np.max(np.abs(y))) <= 10 ** (-1.5 / 20) + 1e-3
     # Quiet passages only get the gain.
     np.testing.assert_allclose(y[25000:29000], 2 * x[25000:29000], atol=2e-3)
+
+
+def test_limit_filter_keeps_a_peak_at_the_very_end(tmp_path):
+    sr = 48000
+    x = np.zeros(sr, dtype=np.float32)
+    x[-100] = 0.5  # inside the limiter's last 5 ms of lookahead
+    x[-50] = 0.2
+    sf.write(tmp_path / "in.wav", x, sr, subtype="FLOAT")
+    apply_filters(tmp_path / "in.wav", tmp_path / "out.wav", limit_filter(0.0, -1.0))
+    y, _ = sf.read(tmp_path / "out.wav", dtype="float32")
+    assert len(y) == len(x)
+    assert int(np.argmax(np.abs(y))) == sr - 100
+    assert y[-100] == pytest.approx(0.5, abs=1e-3)
+    assert y[-50] == pytest.approx(0.2, abs=1e-3)

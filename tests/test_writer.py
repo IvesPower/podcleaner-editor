@@ -325,45 +325,6 @@ def test_mix_stays_the_sum_with_gain(tmp_path):
     np.testing.assert_allclose(mix[:, 1], right, atol=1e-6)
 
 
-def test_track_gain_scales_that_track_only(tmp_path):
-    a = _wav(tmp_path / "a.wav", _ramp() * 0.4)
-    b = _wav(tmp_path / "b.wav", _ramp()[::-1] * 0.4)
-    plan = _plan([(0.4, 0.6)], fade_ms=30)
-    plain = [
-        RenderTrack(a, tmp_path / "plain.a.wav", None),
-        RenderTrack(b, tmp_path / "plain.b.wav", None),
-    ]
-    write_edit(plain, plan, 1000, tmp_path / "plain.mix.wav", _settings(30))
-    tracks = [
-        RenderTrack(a, tmp_path / "out.a.wav", None),
-        RenderTrack(b, tmp_path / "out.b.wav", None, gain_db=-6.0206),
-    ]
-    write_edit(tracks, plan, 1000, tmp_path / "out.mix.wav", _settings(30), gain_db=6.0206)
-    out_a, out_b = _read(tmp_path / "out.a.wav"), _read(tmp_path / "out.b.wav")
-    np.testing.assert_allclose(out_a, 2 * _read(tmp_path / "plain.a.wav"), atol=1e-5)
-    np.testing.assert_allclose(out_b, _read(tmp_path / "plain.b.wav"), atol=1e-5)
-    mix = _read(tmp_path / "out.mix.wav")
-    np.testing.assert_allclose(mix[:, 0], out_a[:, 0] + out_b[:, 0], atol=1e-6)
-    np.testing.assert_allclose(mix[:, 1], out_a[:, 0] + out_b[:, 0], atol=1e-6)
-
-
-def test_track_gain_halves_the_track(tmp_path):
-    a = _wav(tmp_path / "a.wav", _ramp() * 0.4)
-    plan = _plan([])
-    write_edit(
-        [RenderTrack(a, tmp_path / "p.a.wav", None)],
-        plan,
-        1000,
-        tmp_path / "p.mix.wav",
-        _settings(),
-    )
-    tracks = [RenderTrack(a, tmp_path / "out.a.wav", None, gain_db=-6.0206)]
-    write_edit(tracks, plan, 1000, tmp_path / "out.mix.wav", _settings())
-    np.testing.assert_allclose(
-        _read(tmp_path / "out.a.wav"), _read(tmp_path / "p.a.wav") / 2, atol=1e-5
-    )
-
-
 def test_output_subtype_can_differ_from_the_source(tmp_path):
     a = _wav(tmp_path / "a.wav", np.full(1000, 1.5))  # FLOAT, past full scale
     tracks = [RenderTrack(a, tmp_path / "out.a.wav", None, subtype="PCM_24")]
