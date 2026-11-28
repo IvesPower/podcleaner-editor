@@ -6,7 +6,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Julien Gaudet" }]
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "typer",
     "rich",  # the banner (already installed with typer)
@@ -18,6 +18,10 @@ dependencies = [
     "mlx-whisper ; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "faster-whisper ; sys_platform != 'darwin' or platform_machine != 'arm64'",
     "rapidfuzz",
+    "deepfilternet==0.5.6",
+    "torch==2.0.1",  # the version DeepFilterNet 0.5.6 needs
+    "torchaudio==2.0.2",
+    "scipy",
 ]
 
 [project.urls]

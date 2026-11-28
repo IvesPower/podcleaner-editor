@@ -198,3 +198,29 @@ def test_template_round_trips_gate_settings(tmp_path):
     path = _write(tmp_path / "c.toml", render_template(settings_values(Settings())))
     assert load_settings(path) == Settings()
     assert "[gate]" in path.read_text(encoding="utf-8")
+
+
+def test_sound_settings_read_from_toml(tmp_path):
+    path = _write(tmp_path / "c.toml", "[sound]\nenabled = false\ntarget_lufs = -18\n")
+    s = load_settings(path)
+    assert s.sound_enabled is False
+    assert s.sound_target_lufs == -18.0
+
+
+def test_sound_defaults():
+    s = Settings()
+    assert s.sound_enabled is True
+    assert s.sound_denoise is True
+    assert s.sound_target_lufs == -16.0
+    assert s.sound_true_peak_db == -1.0
+    assert s.sound_filters == (
+        "highpass=f=100,lowshelf=f=250:g=-4,equalizer=f=500:t=q:w=1:g=-1.5,"
+        "equalizer=f=2500:t=q:w=1:g=-1,highshelf=f=4500:g=-7,"
+        "acompressor=threshold=-26dB:ratio=3:attack=10:release=250:makeup=2"
+    )
+
+
+def test_template_round_trips_sound_settings(tmp_path):
+    path = _write(tmp_path / "c.toml", render_template(settings_values(Settings())))
+    assert load_settings(path) == Settings()
+    assert "[sound]" in path.read_text(encoding="utf-8")
