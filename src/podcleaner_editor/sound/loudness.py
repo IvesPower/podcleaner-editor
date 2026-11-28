@@ -20,22 +20,29 @@ class Loudness:
 
 
 def measure(paths: list[Path]) -> Loudness:
-    """Integrated loudness and true peak of one file, or of the sum of several."""
+    """Integrated loudness and true peak of one file, or of the sum of several.
+
+    Measured as the mix is written: the writer copies a mono track to both channels at
+    full level, so every input is brought to stereo that way (mono: `pan=stereo|c0=c0|c1=c0`)
+    before summing; the measure is always taken on that stereo result, even for one mono file.
+    """
     if not paths:
         raise EditorError("Nothing to measure.")
     args = ["ffmpeg", "-nostdin", "-nostats", "-hide_banner"]
     for path in paths:
         args += ["-i", path]
-    chain = "ebur128=peak=true"
+    prep = ""
+    for i, path in enumerate(paths):
+        if probe(path).channels == 1:
+            prep += f"[{i}:a]pan=stereo|c0=c0|c1=c0[c{i}];"
+        else:
+            prep += f"[{i}:a]anull[c{i}];"
+    inputs = "".join(f"[c{i}]" for i in range(len(paths)))
     if len(paths) > 1:
-        # Bring every input to the widest layout first, so the sum does not depend on their order.
-        layout = "stereo" if max(probe(p).channels for p in paths) > 1 else "mono"
-        prep = "".join(f"[{i}:a]aformat=channel_layouts={layout}[c{i}];" for i in range(len(paths)))
-        inputs = "".join(f"[c{i}]" for i in range(len(paths)))
-        chain = f"{prep}{inputs}amix=inputs={len(paths)}:normalize=0,{chain}"
+        chain = f"{prep}{inputs}amix=inputs={len(paths)}:normalize=0,ebur128=peak=true[out]"
     else:
-        chain = f"[0:a]{chain}"
-    args += ["-filter_complex", chain + "[out]", "-map", "[out]", "-f", "null", "-"]
+        chain = f"{prep}[c0]ebur128=peak=true[out]"
+    args += ["-filter_complex", chain, "-map", "[out]", "-f", "null", "-"]
     done = _run(args)
     text = done.stderr.decode("utf-8", errors="replace")
     summary = text[text.rfind("Summary:") :] if "Summary:" in text else ""
