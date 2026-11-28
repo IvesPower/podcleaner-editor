@@ -4,11 +4,11 @@
 
 A command-line tool that does the repetitive part of editing a podcast episode, from the raw recording to tracks that are ready to finish by hand in Logic Pro. It replaces Auphonic for the sound and prepares the remaining manual work with timecodes.
 
-> **Status: early development.** The edit works (milestones 1 to 3: silences, overlaps, film clips, transcription, hesitations, voice markers, then the edited tracks, the mix and the markers); studio sound and Claude's opinions are still to come. See the [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md).
+> **Status: early development.** The edit works (milestones 1 to 4: silences, overlaps, film clips, transcription, hesitations, voice markers, the edited tracks, the mix and the markers, then the studio sound); Claude's opinions are still to come. The studio sound settings are not yet tuned by ear. See the [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md).
 
 ## What it will do
 
-- **Studio sound**: noise reduction, de-reverb, EQ, compression and de-essing on each track, then a mix normalised to -16 LUFS and -1 dBTP.
+- **Studio sound**: noise and reverb reduction (DeepFilterNet 3), then high-pass, EQ and compressor on each voice, and one shared gain so the mix lands at -16 LUFS and -1 dBTP.
 - **Silences**: shortens to about 0.4 s every silence longer than 1 s where all tracks are quiet, with a fade.
 - **Hesitations**: removes isolated "uh"s that don't break the sentence, and flags the others.
 - **Overlapping speech**: marks with a timecode each time someone tries to talk over the other person without taking the floor.
@@ -27,7 +27,7 @@ A command-line tool that does the repetitive part of editing a podcast episode, 
 
 ## Outputs
 
-- The voice tracks, gated like Logic Pro's Strip Silence (digital silence where the person is not speaking), and the film track, all cut at the same points with a crossfade at each join so they stay in sync, and a stereo mix (a plain sum, not normalised yet).
+- The voice tracks, gated like Logic Pro's Strip Silence (digital silence where the person is not speaking), and the film track, all cut at the same points with a crossfade at each join so they stay in sync, and a stereo mix (a plain sum of the tracks), all at one shared gain, the film first brought to the voices' level: -16 LUFS and -1 dBTP for the mix.
 - One Markdown edit file per episode: timecodes (on the original and on the final audio) and a report (loudness before and after, what was removed, what was flagged).
 - Markers as a MIDI file and inside the mix WAV, for Logic Pro and Cakewalk.
 
@@ -78,14 +78,20 @@ It also writes, in the same folder:
 
 Each marker is named by its type only: `Requested cut`, `Clip to add`, `Film clip`, `Overlap`, or `Hesitation` for a "euh" that could not be cut. The reasons are in the edit file.
 
-A 2 h 10 episode weighs about 2.3 GB per track; the program checks the free disk space first, and an error leaves no half-written file.
+A 2 h 10 episode weighs about 2.3 GB per track. The sound stage also needs float copies of every track on top of the outputs (about 11 GB more for a 2 h 10 stereo float episode, so about 22 GB free in all); the program checks the free disk space first, and an error leaves no half-written file.
 
 ### Importing into Logic Pro
 
 1. Drag the tracks (`.<voice>.wav` and `.film.wav`) into the project, all at the start: they are the same length and stay in sync.
 2. Markers: either **File > Import > MIDI file** with `Episode 42.markers.mid`, or **Import Marker from Audio File** on the mix. Which of the two lands best is still to be confirmed in Logic.
 
-Coming next: studio sound (M4) and Claude's opinions (M5).
+### Studio sound
+
+Each voice track goes through DeepFilterNet 3 (noise and short reverb), then ffmpeg filters (high-pass, EQ, compressor); the film is not processed, only levelled and limited: its own gain brings it to the voices' loudness, so its clips play at the level of the speech (no gain when the analysis found no film clip). Then a limiter on each track, and one linked across them so the mix stays their sum, let one gain, shared by every track and the mix, bring the mix to -16 LUFS without passing -1 dBTP; when the true peak stops it short of the target, the edit file says so. The first run downloads the DeepFilterNet model once. `--dry-run` does no sound processing.
+
+The `### Sound` section of the edit file gives the chain, the film gain, the shared gain, how much the linked limiter lowered (passages, seconds, deepest reduction), and the loudness and true peak of each file before and after. The `[sound]` section of the configuration sets it: `enabled`, `denoise` (`false` keeps the ffmpeg filters only), `filters` (the ffmpeg filter chain, to tune by ear), `target_lufs` (-16.0) and `true_peak_db` (-1.0).
+
+Coming next: Claude's opinions (M5).
 
 ## Claude, optional
 
@@ -94,7 +100,7 @@ All signal processing runs locally with open source tools (ffmpeg, DeepFilterNet
 ## Requirements
 
 - macOS or Windows
-- Python 3.11 or 3.12, with [uv](https://docs.astral.sh/uv/)
+- Python 3.11 (DeepFilterNet does not support 3.12 yet), with [uv](https://docs.astral.sh/uv/)
 - [ffmpeg](https://ffmpeg.org/) on the `PATH` (`brew install ffmpeg` on macOS, `winget install ffmpeg` on Windows)
 - Input: WAV files only
 
@@ -106,6 +112,7 @@ All signal processing runs locally with open source tools (ffmpeg, DeepFilterNet
 | Roadmap | [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md) | [feuille de route](docs/superpowers/plans/2026-11-05-roadmap.fr.md) |
 | Milestone 1 plan | [M1 plan](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.md) | [plan M1](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.fr.md) |
 | Milestone 2 plan | [M2 plan](docs/superpowers/plans/2026-11-22-m2-transcription-markers.md) | [plan M2](docs/superpowers/plans/2026-11-22-m2-transcription-markers.fr.md) |
+| Milestone 4 plan | [M4 plan](docs/superpowers/plans/2026-11-28-m4-studio-sound.md) | [plan M4](docs/superpowers/plans/2026-11-28-m4-studio-sound.fr.md) |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) | [CHANGELOG.fr.md](CHANGELOG.fr.md) |
 
 ## Contributing

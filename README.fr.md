@@ -4,11 +4,11 @@
 
 Un outil en ligne de commande qui fait le travail répétitif du montage d'un épisode de podcast, du fichier brut aux pistes prêtes à finaliser à la main dans Logic Pro. Il remplace Auphonic pour le son et prépare le travail manuel restant avec des timecodes.
 
-> **État : début du développement.** Le montage fonctionne (jalons 1 à 3 : blancs, chevauchements, extraits de film, transcription, hésitations, marqueurs vocaux, puis les pistes montées, le mixage et les marqueurs) ; le son studio et les avis de Claude restent à venir. Voir la [feuille de route](docs/superpowers/plans/2026-11-05-roadmap.fr.md).
+> **État : début du développement.** Le montage fonctionne (jalons 1 à 4 : blancs, chevauchements, extraits de film, transcription, hésitations, marqueurs vocaux, les pistes montées, le mixage et les marqueurs, puis le son studio) ; les avis de Claude restent à venir. Les réglages du son studio ne sont pas encore validés à l'oreille. Voir la [feuille de route](docs/superpowers/plans/2026-11-05-roadmap.fr.md).
 
 ## Ce qu'il fera
 
-- **Son studio** : débruitage, réduction de la réverb, EQ, compression et de-esser sur chaque piste, puis mixage normalisé à -16 LUFS et -1 dBTP.
+- **Son studio** : réduction du bruit et de la réverb (DeepFilterNet 3), puis passe-haut, EQ et compresseur sur chaque voix, et un seul gain commun pour que le mixage tombe à -16 LUFS et -1 dBTP.
 - **Blancs** : raccourcit à environ 0,4 s tout silence de plus de 1 s où toutes les pistes se taisent, avec un fondu.
 - **Hésitations** : retire les « euh » isolés qui ne cassent pas la phrase, signale les autres.
 - **Paroles qui se chevauchent** : pose un timecode chaque fois qu'une personne tente de parler par-dessus l'autre sans prendre la parole.
@@ -27,7 +27,7 @@ Le mode `--dry-run` écrit le rapport et les timecodes sans toucher à l'audio.
 
 ## Sorties
 
-- Les pistes de voix, passées à la porte comme Strip Silence de Logic Pro (silence numérique là où la personne ne parle pas), et la piste film, toutes coupées aux mêmes endroits avec un fondu enchaîné à chaque raccord pour rester synchronisées, plus un mixage stéréo (une simple somme, pas encore normalisée).
+- Les pistes de voix, passées à la porte comme Strip Silence de Logic Pro (silence numérique là où la personne ne parle pas), et la piste film, toutes coupées aux mêmes endroits avec un fondu enchaîné à chaque raccord pour rester synchronisées, plus un mixage stéréo (une simple somme des pistes), le tout à un seul gain commun, le film d'abord amené au niveau des voix : -16 LUFS et -1 dBTP pour le mixage.
 - Un fichier de montage Markdown par épisode : les timecodes (sur l'audio original et sur l'audio final) et un rapport (loudness avant et après, ce qui a été retiré, ce qui a été signalé).
 - Des marqueurs dans un fichier MIDI et dans le WAV du mixage, pour Logic Pro et Cakewalk.
 
@@ -78,14 +78,20 @@ La commande écrit aussi, dans le même dossier :
 
 Chaque marqueur porte seulement son type : `Requested cut`, `Clip to add`, `Film clip`, `Overlap`, ou `Hesitation` pour un « euh » qui n'a pas pu être coupé. Les raisons sont dans le fichier de montage.
 
-Un épisode de 2 h 10 pèse environ 2,3 Go par piste ; le programme vérifie d'abord la place libre sur le disque, et une erreur ne laisse aucun fichier à moitié écrit.
+Un épisode de 2 h 10 pèse environ 2,3 Go par piste. Le traitement du son demande en plus des copies en float de chaque piste, en plus des sorties (environ 11 Go de plus pour un épisode de 2 h 10 en stéréo float, soit environ 22 Go libres en tout) ; le programme vérifie d'abord la place libre sur le disque, et une erreur ne laisse aucun fichier à moitié écrit.
 
 ### Importer dans Logic Pro
 
 1. Glisser les pistes (`.<voix>.wav` et `.film.wav`) dans le projet, toutes au début : elles ont la même durée et restent synchronisées.
 2. Les marqueurs : soit **Fichier > Importer > Fichier MIDI** avec `Episode 42.markers.mid`, soit **Importer les marqueurs depuis un fichier audio** sur le mixage. Lequel des deux tombe le mieux reste à confirmer dans Logic.
 
-À venir : le son studio (M4) et les avis de Claude (M5).
+### Son studio
+
+Chaque piste de voix passe par DeepFilterNet 3 (bruit et réverb courte), puis par des filtres ffmpeg (passe-haut, EQ, compresseur) ; le film n'est pas traité, seulement mis au niveau et limité : son propre gain l'amène au volume des voix, pour que ses extraits passent au niveau de la parole (aucun gain quand l'analyse n'a trouvé aucun extrait de film). Puis un limiteur sur chaque piste, et un autre lié entre elles pour que le mixage reste leur somme, permettent à un seul gain, commun à toutes les pistes et au mixage, d'amener le mixage à -16 LUFS sans dépasser -1 dBTP ; quand le pic réel l'arrête avant la cible, le fichier de montage le dit. Le premier lancement télécharge une fois le modèle DeepFilterNet. `--dry-run` ne fait aucun traitement du son.
+
+La section `### Sound` du fichier de montage donne la chaîne, le gain du film, le gain commun, ce que le limiteur lié a baissé (passages, secondes, baisse la plus forte), et le volume et le pic réel de chaque fichier avant et après. La section `[sound]` de la configuration la règle : `enabled`, `denoise` (`false` garde les seuls filtres ffmpeg), `filters` (la chaîne de filtres ffmpeg, à régler à l'oreille), `target_lufs` (-16,0) et `true_peak_db` (-1,0).
+
+À venir : les avis de Claude (M5).
 
 ## Claude, en option
 
@@ -94,7 +100,7 @@ Tout le traitement du signal tourne en local avec des outils open source (ffmpeg
 ## Prérequis
 
 - macOS ou Windows
-- Python 3.11 ou 3.12, avec [uv](https://docs.astral.sh/uv/)
+- Python 3.11 (DeepFilterNet ne gère pas encore 3.12), avec [uv](https://docs.astral.sh/uv/)
 - [ffmpeg](https://ffmpeg.org/) dans le `PATH` (`brew install ffmpeg` sur macOS, `winget install ffmpeg` sur Windows)
 - En entrée : fichiers WAV uniquement
 
@@ -106,6 +112,7 @@ Tout le traitement du signal tourne en local avec des outils open source (ffmpeg
 | Feuille de route | [roadmap](docs/superpowers/plans/2026-11-05-roadmap.md) | [feuille de route](docs/superpowers/plans/2026-11-05-roadmap.fr.md) |
 | Plan du jalon 1 | [M1 plan](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.md) | [plan M1](docs/superpowers/plans/2026-11-05-m1-foundations-analysis.fr.md) |
 | Plan du jalon 2 | [M2 plan](docs/superpowers/plans/2026-11-22-m2-transcription-markers.md) | [plan M2](docs/superpowers/plans/2026-11-22-m2-transcription-markers.fr.md) |
+| Plan du jalon 4 | [M4 plan](docs/superpowers/plans/2026-11-28-m4-studio-sound.md) | [plan M4](docs/superpowers/plans/2026-11-28-m4-studio-sound.fr.md) |
 | Journal des versions | [CHANGELOG.md](CHANGELOG.md) | [CHANGELOG.fr.md](CHANGELOG.fr.md) |
 
 ## Contribuer

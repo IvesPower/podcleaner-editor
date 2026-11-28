@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile as sf
+from conftest import IdentityDenoiser
 from typer.testing import CliRunner
 
 from podcleaner_editor import pipeline
@@ -20,6 +21,9 @@ from podcleaner_editor.errors import EditorError
 from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.render.markers import Marker, read_wav_markers
 from podcleaner_editor.report.markdown import AnalysisResult
+from podcleaner_editor.sound.filters import limit_filter
+from podcleaner_editor.sound.limiter import LimiterReport
+from podcleaner_editor.sound.loudness import measure
 from podcleaner_editor.timeline import Interval as I
 
 SETTINGS = replace(Settings(), speakers=("Julien", "Franck"))
@@ -550,7 +554,7 @@ def test_markers_match_events_and_flagged_fillers(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "make_transcriber", lambda settings: fake)
     monkeypatch.setattr(pipeline, "decode_mono_16k", fake.decode)
     monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, settings: [I(15, 45)])
-    settings = replace(SETTINGS, passage_gap_s=20.0)
+    settings = replace(SETTINGS, passage_gap_s=20.0, sound_enabled=False)  # markers only
     out = tmp_path / "out"
     pipeline.run(load_episode([voices], film, "ep", settings), settings, out, dry_run=False)
 
@@ -588,13 +592,14 @@ def test_gate_follows_settings(tmp_path, monkeypatch):
     film = _film(tmp_path / "film.wav", 10, (0, 0), sr=RATE)
     monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, settings: [I(0, 10)])
     results = _capture(monkeypatch)
-    episode = load_episode([a, b], film, "ep", SETTINGS)
+    settings = replace(SETTINGS, sound_enabled=False)  # raw levels
+    episode = load_episode([a, b], film, "ep", settings)
 
-    pipeline.run(episode, SETTINGS, tmp_path / "on", dry_run=False)
+    pipeline.run(episode, settings, tmp_path / "on", dry_run=False)
     assert results[-1].gates == {"Julien": (), "Franck": ()}
     assert not np.any(sf.read(tmp_path / "on" / "ep.julien.wav")[0])
 
-    off = replace(SETTINGS, gate_enabled=False)
+    off = replace(settings, gate_enabled=False)
     pipeline.run(episode, off, tmp_path / "off", dry_run=False)
     assert results[-1].gates is None
     for name in ("julien", "franck"):
@@ -655,6 +660,310 @@ def test_run_reports_a_track_that_cannot_be_opened(tmp_path):
     b.write_bytes(b"not a wav file")
     with pytest.raises(EditorError, match=re.escape("Could not open the tracks: ")):
         pipeline.run(episode, SETTINGS, tmp_path / "out", dry_run=False)
+
+
+class _RaisingDenoiser:
+    name = "raising"
+    rate = 8000
+
+    def __call__(self, mono):
+        raise AssertionError("no sound should be processed")
+
+
+def _sound_run(tmp_path, monkeypatch, settings=SETTINGS, voices=None, film_tone=(20, 24), **kwargs):
+    """Runs the edit of two 8 kHz voices and a film with sound, returning the output folder."""
+    if voices is None:
+        voices = (
+            _voice(tmp_path / "julien.wav", 30, [(2, 8)], amp=0.05),
+            _voice(tmp_path / "franck.wav", 30, [(12, 16)], amp=0.05),
+        )
+    film = _film(tmp_path / "film.wav", 30, film_tone, sr=RATE)
+    monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, st: [I(2, 8), I(12, 16)])
+    out = tmp_path / "out"
+    episode = load_episode(list(voices), film, "ep", settings)
+    pipeline.run(episode, settings, out, dry_run=False, **kwargs)
+    return out
+
+
+def _sound_lines(text: str) -> list[str]:
+    return text.split("### Sound\n\n", 1)[1].split("\n\n###", 1)[0].splitlines()
+
+
+def test_run_processes_the_voices_not_the_film(tmp_path, monkeypatch):
+    denoised, filtered, chains, written, messages = [], [], [], [], []
+    real_denoise, real_filters = pipeline.denoise_file, pipeline.apply_filters
+    real_write = pipeline.write_edit
+
+    def denoise(source, target, denoiser, **kwargs):
+        denoised.append(source.name)
+        real_denoise(source, target, denoiser, **kwargs)
+
+    def filters(source, target, chain):
+        filtered.append(target.name)
+        chains.append(chain)
+        real_filters(source, target, chain)
+
+    def write(tracks, *args, **kwargs):
+        written.append((tracks, kwargs["gain_db"]))
+        steps.append("write")
+        return real_write(tracks, *args, **kwargs)
+
+    steps, gains = [], []
+    real_measure = pipeline.measure
+
+    def measuring(paths, gains_db=None):
+        steps.append(sorted(p.name for p in paths))
+        if gains_db is not None:
+            gains.append(dict(zip((p.name for p in paths), gains_db, strict=True)))
+        return real_measure(paths, gains_db)
+
+    monkeypatch.setattr(pipeline, "measure", measuring)
+
+    made = []
+
+    def make():
+        made.append(IdentityDenoiser(RATE))
+        return made[-1]
+
+    monkeypatch.setattr(pipeline, "denoise_file", denoise)
+    monkeypatch.setattr(pipeline, "apply_filters", filters)
+    monkeypatch.setattr(pipeline, "write_edit", write)
+    monkeypatch.setattr(pipeline, "make_denoiser", make)
+    out = _sound_run(tmp_path, monkeypatch, progress=messages.append)
+
+    assert denoised == ["julien.wav", "franck.wav"]
+    limited = [
+        ".ep.julien.limited.sound.tmp.wav",
+        ".ep.franck.limited.sound.tmp.wav",
+        ".ep.film.sound.tmp.wav",
+    ]
+    assert filtered == [".ep.julien.sound.tmp.wav", ".ep.franck.sound.tmp.wav", *limited]
+    assert len(made) == 1 and made[0].calls >= 2  # created once, for the first voice
+    [(tracks, rest)] = written
+    assert [t.source.name for t in tracks] == limited
+    assert [t.subtype for t in tracks] == ["PCM_16", "PCM_16", "PCM_24"]
+    raw = ["film.wav", "franck.wav", "julien.wav"]
+    after = [["ep.julien.wav"], ["ep.franck.wav"], ["ep.film.wav"], ["ep.mix.wav"]]
+    assert steps == [
+        ["julien.wav"],
+        ["franck.wav"],
+        ["film.wav"],
+        raw,  # every raw measure before the write
+        [".ep.franck.sound.tmp.wav", ".ep.julien.sound.tmp.wav"],  # the processed voices
+        [".ep.franck.sound.tmp.wav", ".ep.julien.sound.tmp.wav", "film.wav"],
+        sorted(limited),  # after the limiter on each track
+        sorted(limited),  # after the make-up gain and the linked limiter
+        "write",
+        *after,
+    ]
+    assert [p.name for p in out.iterdir() if ".tmp" in p.name] == []
+    assert [
+        m for m in messages if any(w in m for w in ("sound", "loudness", "Levelling", "Writing"))
+    ] == [
+        "Processing the sound of Julien… (the DeepFilterNet model is downloaded on first use)",
+        "Processing the sound of Franck…",
+        "Measuring the loudness…",
+        "Levelling the tracks…",
+        "Writing the edited tracks…",
+        "Measuring the loudness of the written files…",
+    ]
+    # The film gets its own gain on top of the voices' gain, both before the limiter.
+    [weighted] = [g for g in gains if g]
+    assert weighted[".ep.julien.sound.tmp.wav"] == weighted[".ep.franck.sound.tmp.wav"] == 0
+    fg = weighted["film.wav"]
+    voice_gain = float(re.match(r"volume=(-?[\d.]+)dB,alimiter=", chains[2]).group(1))
+    assert chains[3] == chains[2]
+    assert chains[4] == limit_filter(fg + voice_gain, SETTINGS.sound_true_peak_db)
+    assert chains[2] == limit_filter(voice_gain, SETTINGS.sound_true_peak_db)
+    assert abs(rest) < 1.0  # only a small remainder is left to the writer
+
+
+def test_mix_reaches_the_target_loudness(tmp_path, monkeypatch):
+    out = _sound_run(tmp_path, monkeypatch)
+    assert measure([out / "ep.mix.wav"]).lufs == pytest.approx(-16.0, abs=0.5)
+
+
+def test_loud_film_is_brought_to_the_voices(tmp_path, monkeypatch):
+    # The film's 0.5 sine is 12 dB above the 0.125 voices.
+    voices = (
+        _voice(tmp_path / "julien.wav", 30, [(2, 8)], amp=0.125),
+        _voice(tmp_path / "franck.wav", 30, [(12, 16)], amp=0.125),
+    )
+    out = _sound_run(tmp_path, monkeypatch, voices=voices)
+    spoken = measure([out / "ep.julien.wav", out / "ep.franck.wav"])
+    assert measure([out / "ep.film.wav"]).lufs == pytest.approx(spoken.lufs, abs=1.0)
+    assert measure([out / "ep.mix.wav"]).lufs == pytest.approx(-16.0, abs=0.5)
+
+
+def test_film_without_clips_keeps_its_level(tmp_path, monkeypatch):
+    # The film's 0.5 sine would be lowered 12 dB, but no clip was found: it is not a clip.
+    monkeypatch.setattr(pipeline, "film_clips", lambda *args: [])
+    voices = (
+        _voice(tmp_path / "julien.wav", 30, [(2, 8)], amp=0.125),
+        _voice(tmp_path / "franck.wav", 30, [(12, 16)], amp=0.125),
+    )
+    out = _sound_run(tmp_path, monkeypatch, voices=voices)
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert " · film +0.0 dB · " in _sound_lines(text)[0]
+
+
+def _clicky_voice(tmp_path):
+    """A quiet voice with one loud click: reaching -16 LUFS would push the click past -1 dBTP."""
+    t = np.arange(30 * RATE) / RATE
+    quiet = 0.01 * np.sin(2 * np.pi * 440 * t)
+    quiet[5 * RATE] = 0.9
+    path = tmp_path / "julien.wav"
+    sf.write(path, quiet, RATE, subtype="FLOAT")
+    return path
+
+
+_ONE_VOICE = replace(SETTINGS, speakers=("A", "B"), gate_enabled=False, sound_filters="")
+
+
+def test_limiter_lets_the_mix_reach_the_target(tmp_path, monkeypatch):
+    voices = [_clicky_voice(tmp_path)]
+    out = _sound_run(tmp_path, monkeypatch, _ONE_VOICE, voices=voices, film_tone=(0, 0))
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert "Target not reached" not in _sound_lines(text)[0]
+    mix = measure([out / "ep.mix.wav"])
+    assert mix.lufs == pytest.approx(-16.0, abs=0.5)
+    assert mix.true_peak_db <= -1.0
+
+
+def test_peaks_shared_by_two_voices_are_limited_together(tmp_path, monkeypatch):
+    # Each voice alone passes its limiter; their sum at the same click would not.
+    julien = _clicky_voice(tmp_path)
+    franck = tmp_path / "franck.wav"
+    franck.write_bytes(julien.read_bytes())
+    voices = [julien, franck]
+    settings = replace(SETTINGS, gate_enabled=False, sound_filters="")
+    out = _sound_run(tmp_path, monkeypatch, settings, voices=voices, film_tone=(0, 0))
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert "Target not reached" not in _sound_lines(text)[0]
+    assert re.search(
+        r" Limiter: 1 passage, \d+\.\d s reduced, deepest -\d+\.\d dB\.$", _sound_lines(text)[0]
+    )
+    mix = measure([out / "ep.mix.wav"])
+    assert mix.lufs == pytest.approx(-16.0, abs=0.5)
+    assert mix.true_peak_db <= -1.0
+
+
+def test_gain_capped_by_true_peak(tmp_path, monkeypatch):
+    # Without the limiters, the click holds the shared gain.
+    monkeypatch.setattr(pipeline, "limit_filter", lambda gain, peak: f"volume={gain}dB")
+    monkeypatch.setattr(
+        pipeline, "link_limit", lambda paths, limit, gain_db: LimiterReport(0, 0.0, 0.0)
+    )
+    voices = [_clicky_voice(tmp_path)]
+    out = _sound_run(tmp_path, monkeypatch, _ONE_VOICE, voices=voices, film_tone=(0, 0))
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert "Target not reached: true peak held at -1.0 dBTP." in _sound_lines(text)[0]
+    mix = measure([out / "ep.mix.wav"])
+    assert mix.true_peak_db <= -0.8
+    assert mix.lufs < -17.0
+
+
+def test_sound_disabled_writes_raw_levels(tmp_path, monkeypatch):
+    settings = replace(SETTINGS, sound_enabled=False)
+    out = _sound_run(tmp_path, monkeypatch, settings, denoiser=_RaisingDenoiser())
+    data, _ = sf.read(out / "ep.julien.wav", dtype="float32")
+    assert np.max(np.abs(data)) == pytest.approx(0.05, abs=1e-3)
+    assert sf.info(out / "ep.julien.wav").subtype == "PCM_16"
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert _sound_lines(text) == ["Not processed: [sound] enabled = false."]
+
+
+def test_sound_section_in_edit_file(tmp_path, monkeypatch):
+    out = _sound_run(tmp_path, monkeypatch)
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert text.index("### Tracks") < text.index("### Sound") < text.index("### Silences")
+    lines = _sound_lines(text)
+    assert re.fullmatch(
+        r"DeepFilterNet 3 \+ filters · film [+-]\d+\.\d dB · gain [+-]\d+\.\d dB · "
+        r"target -16\.0 LUFS\. Limiter: (no reduction|\d+ passages?, \d+\.\d s reduced, "
+        r"deepest -\d+\.\d dB)\.",
+        lines[0],
+    )
+    assert lines[1:3] == ["", "| File | Before | After |"]
+    cell = r"-?\d+\.\d LUFS / -?(\d+\.\d|inf) dBTP"
+    rows = lines[4:]
+    names = ["ep.julien.wav", "ep.franck.wav", "ep.film.wav", "ep.mix.wav"]
+    assert [r.split(" | ")[0].lstrip("| ") for r in rows] == names
+    for row in rows:
+        assert re.fullmatch(rf"\| \S+ \| {cell} \| {cell} \|", row), row
+    after_mix = measure([out / "ep.mix.wav"])
+    assert rows[3].endswith(f"| {after_mix.lufs:.1f} LUFS / {after_mix.true_peak_db:.1f} dBTP |")
+
+
+def test_sound_section_names_the_filters_only_chain(tmp_path, monkeypatch):
+    plain = replace(SETTINGS, sound_denoise=False)
+    out = _sound_run(tmp_path, monkeypatch, plain, denoiser=_RaisingDenoiser())
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert _sound_lines(text)[0].startswith("filters only · film ")
+
+
+def test_no_sound_tmp_left_after_an_error(tmp_path, monkeypatch):
+    real = pipeline.apply_filters
+    calls = []
+
+    def failing(source, target, chain):
+        calls.append(target)
+        if len(calls) == 2:
+            target.write_bytes(b"half written")
+            raise EditorError("ffmpeg could not apply the sound filters: boom")
+        real(source, target, chain)
+
+    monkeypatch.setattr(pipeline, "apply_filters", failing)
+    with pytest.raises(EditorError, match="boom"):
+        _sound_run(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    assert len(calls) == 2 and calls[0].parent == out
+    assert [p.name for p in out.iterdir() if ".tmp" in p.name] == []
+
+
+def test_dry_run_processes_no_sound(edit_files, tmp_path, monkeypatch):
+    a, b, film = edit_files
+
+    def never(*args, **kwargs):
+        raise AssertionError("no sound should be processed")
+
+    monkeypatch.setattr(pipeline, "speech_intervals", lambda samples, settings: [I(2, 8)])
+    monkeypatch.setattr(pipeline, "make_denoiser", never)
+    monkeypatch.setattr(pipeline, "apply_filters", never)
+    monkeypatch.setattr(pipeline, "measure", never)
+    out = tmp_path / "out"
+    episode = load_episode([a, b], film, "ep", SETTINGS)
+    pipeline.run(episode, SETTINGS, out, dry_run=True, denoiser=_RaisingDenoiser())
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert _sound_lines(text) == ["None: dry run, no audio written."]
+
+
+def test_pcm24_source_keeps_its_subtype(tmp_path, monkeypatch):
+    voices = []
+    for name, span in (("julien", (2, 8)), ("franck", (12, 16))):
+        path = _voice(tmp_path / f"{name}.wav", 30, [span], amp=0.05)
+        data, _ = sf.read(path)
+        sf.write(path, data, RATE, subtype="PCM_24")
+        voices.append(path)
+    out = _sound_run(tmp_path, monkeypatch, voices=voices)
+    for name in ("julien", "franck", "film"):
+        assert sf.info(out / f"ep.{name}.wav").subtype == "PCM_24"
+    assert sf.info(out / "ep.mix.wav").subtype == "FLOAT"
+
+
+def test_space_check_counts_the_sound_temporaries(tmp_path, monkeypatch):
+    seen = []
+
+    def check(sources, n_out, folder, extra_bytes=0):
+        seen.append(extra_bytes)
+        raise EditorError("Not enough disk space in somewhere")
+
+    monkeypatch.setattr(pipeline, "check_space", check)
+    with pytest.raises(EditorError, match="Not enough disk space"):
+        _sound_run(tmp_path, monkeypatch)
+    # Two mono float voices of 30 s at 8 kHz, one intermediate file at a time, and the film.
+    assert seen == [4 * (30 * RATE * 4 + 4096)]
+    assert not (tmp_path / "out" / ".ep.julien.sound.tmp.wav").exists()
 
 
 @pytest.mark.parametrize(
@@ -822,3 +1131,50 @@ def test_pedit_edit_outputs(tmp_path):
     edges = np.diff(np.concatenate(([0], silent, [0])))
     runs = np.flatnonzero(edges == -1) - np.flatnonzero(edges == 1)
     assert runs.max(initial=0) >= 0.4 * 44100
+
+
+AUPHONIC_MP3 = SAMPLES / "pedit-full-ia.mp3"
+AUPHONIC_SPEECH_START_S = 6.4087  # the jingle before it is ignored
+BANDS_HZ = [(60, 150), (150, 300), (300, 800), (800, 2000), (2000, 4000), (4000, 8000)]
+
+
+def _band_balance_db(samples: np.ndarray) -> np.ndarray:
+    """Level of each band in dB relative to the 800-2000 Hz band, from a Welch spectrum."""
+    from scipy.signal import welch
+
+    freqs, power = welch(samples, fs=ANALYSIS_RATE, nperseg=4096)
+    levels = np.array(
+        [10 * np.log10(power[(freqs >= lo) & (freqs < hi)].sum()) for lo, hi in BANDS_HZ]
+    )
+    return levels - levels[3]
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not SAMPLES.is_dir(), reason="samples/pedit/ is not available")
+def test_pedit_studio_sound(tmp_path):
+    # Slow tests skip the conftest denoiser fake, so this one runs the real DeepFilterNet.
+    name = "pedit"
+    result = _cli(
+        "--voice", JULIEN_WAV, "--voice", FRANCK_WAV, "--film", FILM_WAV, "--out", tmp_path / name
+    )
+    assert result.exit_code == 0, result.output
+    out = tmp_path / name
+    names = ["voice-a", "voice-b", "film", "mix"]
+    wavs = [out / f"{name}.{n}.wav" for n in names]
+    assert len({sf.info(p).frames for p in wavs}) == 1
+
+    mix = measure([wavs[3]])
+    text = (out / f"{name}.edit.md").read_text(encoding="utf-8")
+    assert "### Sound" in text
+    # The film's loud clip is brought to the voices first, so the target is reached.
+    assert "Target not reached" not in text
+    assert mix.lufs == pytest.approx(-16.0, abs=0.5)
+    assert mix.true_peak_db <= -1.0
+
+    if not AUPHONIC_MP3.is_file():
+        pytest.skip("pedit-full-ia.mp3 is not available")
+    # Long-term spectra: the mix is the cut edit and the Auphonic file is not, so no alignment.
+    ours = _band_balance_db(decode_mono_16k(wavs[3]))
+    reference = decode_mono_16k(AUPHONIC_MP3)[int(AUPHONIC_SPEECH_START_S * ANALYSIS_RATE) :]
+    difference = np.abs(ours - _band_balance_db(reference))
+    assert difference.mean() <= 2.5, difference

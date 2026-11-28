@@ -32,6 +32,15 @@ class Settings:
     gate_min_silence_s: float = 0.5
     gate_attack_s: float = 0.010
     gate_release_s: float = 0.1
+    sound_enabled: bool = True
+    sound_denoise: bool = True
+    sound_filters: str = (
+        "highpass=f=100,lowshelf=f=250:g=-4,equalizer=f=500:t=q:w=1:g=-1.5,"
+        "equalizer=f=2500:t=q:w=1:g=-1,highshelf=f=4500:g=-7,"
+        "acompressor=threshold=-26dB:ratio=3:attack=10:release=250:makeup=2"
+    )
+    sound_target_lufs: float = -16.0
+    sound_true_peak_db: float = -1.0
     vad_threshold: float = 0.5
     vad_min_speech_ms: int = 250
     vad_min_silence_ms: int = 100
@@ -109,6 +118,23 @@ _KEYS: dict[tuple[str, str], tuple[str, str]] = {
     ("gate", "release_s"): (
         "gate_release_s",
         "The gate closes this long after the voice (seconds).",
+    ),
+    ("sound", "enabled"): (
+        "sound_enabled",
+        "Process the sound of each voice (noise, reverb, EQ, loudness).",
+    ),
+    ("sound", "denoise"): (
+        "sound_denoise",
+        "Remove noise and reverb with DeepFilterNet before the filters.",
+    ),
+    ("sound", "filters"): (
+        "sound_filters",
+        "ffmpeg filters applied to each voice, after the denoiser.",
+    ),
+    ("sound", "target_lufs"): ("sound_target_lufs", "Loudness of the mix (LUFS)."),
+    ("sound", "true_peak_db"): (
+        "sound_true_peak_db",
+        "Highest true peak of the mix (dBTP).",
     ),
     ("vad", "threshold"): ("vad_threshold", "Speech detection threshold (0 to 1)."),
     ("vad", "min_speech_ms"): ("vad_min_speech_ms", "Shortest speech kept (milliseconds)."),
@@ -232,6 +258,9 @@ def load_settings(path: Path) -> Settings:
             name = _KEYS[(section, key)][0]
             label = f"{path}: [{section}] {key}"
             values[name] = _convert(name, raw, label)
+            if name == "sound_true_peak_db" and not -20.0 <= values[name] <= 0.0:
+                # The limiter's level, 0.5 dB under it, must stay within what alimiter takes.
+                raise EditorError(f"{label} must be between -20.0 and 0.0 dBTP")
             if name in _SINGLE_WORDS:
                 _check_single_words(values[name], label)
     return Settings(**values)

@@ -5,6 +5,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+from podcleaner_editor import pipeline
+
 
 def write_audio(
     path: Path,
@@ -40,3 +42,24 @@ def _isolated_config(tmp_path_factory, monkeypatch):
     path = tmp_path_factory.mktemp("config") / "config.toml"
     monkeypatch.setenv("PODCLEANER_EDITOR_CONFIG", str(path))
     return path
+
+
+class IdentityDenoiser:
+    """A denoiser that leaves the audio as it is, counting its calls."""
+
+    name = "identity"
+
+    def __init__(self, rate: int = 8000) -> None:
+        self.rate = rate
+        self.calls = 0
+
+    def __call__(self, mono: np.ndarray) -> np.ndarray:
+        self.calls += 1
+        return mono
+
+
+@pytest.fixture(autouse=True)
+def _no_deepfilternet(request, monkeypatch):
+    """Fast tests never load DeepFilterNet: the default denoiser leaves the audio as it is."""
+    if request.node.get_closest_marker("slow") is None:
+        monkeypatch.setattr(pipeline, "make_denoiser", IdentityDenoiser)

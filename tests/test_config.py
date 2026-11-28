@@ -93,6 +93,21 @@ def test_wrong_type_raises(tmp_path):
         load_settings(path)
 
 
+@pytest.mark.parametrize("value", ["0.5", "-20.5", "-40"])
+def test_true_peak_out_of_range_raises(tmp_path, value):
+    path = _write(tmp_path / "c.toml", f"[sound]\ntrue_peak_db = {value}\n")
+    with pytest.raises(
+        EditorError, match=r"\[sound\] true_peak_db must be between -20\.0 and 0\.0 dBTP"
+    ):
+        load_settings(path)
+
+
+@pytest.mark.parametrize("value", ["0.0", "-20.0", "-1.0"])
+def test_true_peak_in_range_loads(tmp_path, value):
+    path = _write(tmp_path / "c.toml", f"[sound]\ntrue_peak_db = {value}\n")
+    assert load_settings(path).sound_true_peak_db == float(value)
+
+
 @pytest.mark.parametrize("names", ['["Julien", "Julien"]', '["Julien", " julien "]'])
 def test_speakers_must_be_two_different_names(tmp_path, names):
     path = _write(tmp_path / "c.toml", f"[recording]\nspeakers = {names}\n")
@@ -198,3 +213,29 @@ def test_template_round_trips_gate_settings(tmp_path):
     path = _write(tmp_path / "c.toml", render_template(settings_values(Settings())))
     assert load_settings(path) == Settings()
     assert "[gate]" in path.read_text(encoding="utf-8")
+
+
+def test_sound_settings_read_from_toml(tmp_path):
+    path = _write(tmp_path / "c.toml", "[sound]\nenabled = false\ntarget_lufs = -18\n")
+    s = load_settings(path)
+    assert s.sound_enabled is False
+    assert s.sound_target_lufs == -18.0
+
+
+def test_sound_defaults():
+    s = Settings()
+    assert s.sound_enabled is True
+    assert s.sound_denoise is True
+    assert s.sound_target_lufs == -16.0
+    assert s.sound_true_peak_db == -1.0
+    assert s.sound_filters == (
+        "highpass=f=100,lowshelf=f=250:g=-4,equalizer=f=500:t=q:w=1:g=-1.5,"
+        "equalizer=f=2500:t=q:w=1:g=-1,highshelf=f=4500:g=-7,"
+        "acompressor=threshold=-26dB:ratio=3:attack=10:release=250:makeup=2"
+    )
+
+
+def test_template_round_trips_sound_settings(tmp_path):
+    path = _write(tmp_path / "c.toml", render_template(settings_values(Settings())))
+    assert load_settings(path) == Settings()
+    assert "[sound]" in path.read_text(encoding="utf-8")
