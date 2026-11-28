@@ -218,3 +218,21 @@ def test_deepfilternet_lowers_noise(tmp_path):
     assert out_sr == sr
     assert out.shape == noisy.shape
     assert _floor_db(out, sr) < _floor_db(noisy, sr) - 10
+
+
+def test_output_over_the_wav_limit_is_rf64(tmp_path, monkeypatch):
+    from podcleaner_editor.render import writer
+
+    monkeypatch.setattr(writer, "_WAV_LIMIT", 1000)
+    sr = 48000
+    sf.write(tmp_path / "in.wav", _band_limited_noise(sr, sr, 1), sr, subtype="PCM_16")
+    denoise_file(tmp_path / "in.wav", tmp_path / "out.wav", _Fake())
+    info = sf.info(tmp_path / "out.wav")
+    assert info.format == "RF64" and info.subtype == "FLOAT" and info.frames == sr
+
+
+def test_output_under_the_wav_limit_is_wav(tmp_path):
+    sr = 48000
+    sf.write(tmp_path / "in.wav", _band_limited_noise(sr, sr, 1), sr, subtype="PCM_16")
+    denoise_file(tmp_path / "in.wav", tmp_path / "out.wav", _Fake())
+    assert sf.info(tmp_path / "out.wav").format == "WAV"

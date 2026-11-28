@@ -160,3 +160,18 @@ def test_a_shorter_file_ending_inside_a_block(tmp_path):
     assert np.max(np.abs(out_l[:9000] + out_s)) <= 0.8 + 1e-6
     np.testing.assert_allclose(out_l[9000:], scale * long[9000:], atol=1e-5)
     np.testing.assert_allclose(out_s[6000:], scale * short[6000:], atol=1e-5)
+
+
+def test_rf64_files_are_limited(tmp_path):
+    n = 2 * RATE
+    a = _tone(n, 0.3)
+    a[RATE : RATE + 400] *= 4  # 1.2 alone
+    path = tmp_path / "a.wav"
+    sf.write(path, a.astype(np.float32), RATE, subtype="FLOAT", format="RF64")
+    assert sf.info(path).format == "RF64"
+    report = link_limit([path], 0.8, block_s=0.5)
+    assert report.passages == 1
+    out = _read(path)[:, 0]
+    assert len(out) == n
+    assert np.max(np.abs(out)) <= 0.8 + 1e-6
+    np.testing.assert_allclose(out[: RATE - 200], a[: RATE - 200], atol=1e-6)

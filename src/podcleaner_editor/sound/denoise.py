@@ -8,6 +8,7 @@ import numpy as np
 import soundfile as sf
 
 from podcleaner_editor.errors import EditorError
+from podcleaner_editor.render.writer import _wav_format
 
 # Length of the linear crossfade in the middle of each overlap.
 _CROSSFADE_S = 0.5
@@ -103,7 +104,8 @@ def denoise_file(
     slice_s: float = 30.0,
     overlap_s: float = 1.0,
 ) -> None:
-    """Writes `source` denoised to `target`: FLOAT, same rate, channels and length.
+    """Writes `source` denoised to `target`: FLOAT, same rate, channels and length, as RF64
+    when it would pass the 4 GiB limit of a plain WAV.
 
     The mono average is cleaned in slices of `slice_s` that overlap by `overlap_s`,
     joined by a linear crossfade over the middle of each overlap.
@@ -118,8 +120,9 @@ def denoise_file(
         fade = min(round(_CROSSFADE_S * sr), overlap)
         fade_at = (overlap - fade) // 2
         ramp = ((np.arange(fade) + 0.5) / fade).astype(np.float32) if fade else None
+        kind = _wav_format(n, channels, "FLOAT")
         with sf.SoundFile(
-            target, "w", samplerate=sr, channels=channels, subtype="FLOAT", format="WAV"
+            target, "w", samplerate=sr, channels=channels, subtype="FLOAT", format=kind
         ) as out:
             start = 0
             pending: np.ndarray | None = None

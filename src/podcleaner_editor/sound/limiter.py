@@ -38,25 +38,38 @@ class _Wav:
 
 
 def _wav(path: Path) -> _Wav:
-    """The layout of a 32-bit float WAV file; `EditorError` for any other file.
+    """The layout of a 32-bit float WAV or RF64 file; `EditorError` for any other file.
 
     libsndfile cannot update some headers (ffmpeg's) in place, and rewrites the header when it
-    can, so the data chunk is found here and only the samples are ever written.
+    can, so the data chunk is found here and only the samples are ever written. An RF64 file
+    (over 4 GiB) gives its data size in its `ds64` chunk.
     """
     unexpected = f"The sound temporary {path.name} is not a 32-bit float WAV file"
     info = sf.info(path)
-    if info.format != "WAV" or info.subtype != "FLOAT":
+    if info.format not in ("WAV", "RF64") or info.subtype != "FLOAT":
         raise EditorError(f"{unexpected} ({info.format}, {info.subtype}).")
+    frame_bytes = info.channels * _SAMPLE_BYTES
     with path.open("rb") as f:
-        if f.read(4) != b"RIFF" or f.read(8)[4:] != b"WAVE":
+        riff = f.read(4)
+        if riff not in (b"RIFF", b"RF64") or f.read(8)[4:] != b"WAVE":
             raise EditorError(f"{unexpected}: no RIFF WAVE header.")
+        data_size: int | None = None
         while True:
             head = f.read(8)
             if len(head) < 8:
                 raise EditorError(f"{unexpected}: no data chunk.")
             chunk, size = head[:4], struct.unpack("<I", head[4:])[0]
+            if chunk == b"ds64":
+                data_size = struct.unpack("<Q", f.read(16)[8:])[0]
+                f.seek(size - 16 + size % 2, 1)
+                continue
             if chunk == b"data":
-                return _Wav(path, f.tell(), info.frames, info.channels)
+                frames = info.frames
+                if riff == b"RF64":
+                    if data_size is None:
+                        raise EditorError(f"{unexpected}: no ds64 chunk.")
+                    frames = data_size // frame_bytes
+                return _Wav(path, f.tell(), frames, info.channels)
             f.seek(size + size % 2, 1)
 
 

@@ -69,3 +69,20 @@ def test_limit_filter_keeps_a_peak_at_the_very_end(tmp_path):
     assert int(np.argmax(np.abs(y))) == sr - 100
     assert y[-100] == pytest.approx(0.5, abs=1e-3)
     assert y[-50] == pytest.approx(0.2, abs=1e-3)
+
+
+def test_filters_write_rf64_past_the_wav_limit(tmp_path, monkeypatch):
+    from podcleaner_editor.sound import filters
+
+    seen = []
+    real = filters._run
+
+    def spy(args):
+        seen.append([str(a) for a in args])
+        return real(args)
+
+    monkeypatch.setattr(filters, "_run", spy)
+    apply_filters(_source(tmp_path), tmp_path / "out.wav", "")
+    args = seen[0]
+    assert args[args.index("-rf64") + 1] == "auto"
+    assert sf.info(tmp_path / "out.wav").format == "WAV"  # small: still a plain WAV
