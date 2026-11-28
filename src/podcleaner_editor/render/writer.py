@@ -169,8 +169,10 @@ def _write_piece(
     block: int,
     rate: int,
     settings: Settings,
+    scale: float = 1.0,
 ) -> int:
-    """Write one piece to every track and to the mix; return the frames written."""
+    """Write one piece to every track and to the mix, each track times `scale`; return the
+    frames written."""
     first = piece.start - piece.fade_in
     length = piece.end + piece.fade_out - first
     head = 2 * piece.fade_in
@@ -194,6 +196,9 @@ def _write_piece(
                     settings.gate_release_s,
                 )
                 data *= gain[:, None]
+            if scale != 1.0:
+                # The fades are linear, so scaling here equals scaling after them.
+                data *= scale
             # Positions within the piece, not within the block, index the fades.
             chunks: list[np.ndarray] = []
             if a < head:
@@ -239,9 +244,13 @@ def write_edit(
     mix_target: Path,
     settings: Settings,
     markers: list[Marker] | None = None,
+    gain_db: float = 0.0,
 ) -> tuple[int, bool]:
     """Write every cut track and their stereo mix in one streamed pass; return `n_out` and
     whether the `markers` went into the mix (False when it is RF64 or would pass 4 GiB).
+
+    Every track, and so the mix, is multiplied by `gain_db` (in dB) after the gate and the
+    fades and before any integer clipping; the mix stays the sum of the written tracks.
 
     Each output is first written to `<target>.tmp`, the markers added to the mix's; the
     targets are replaced only at the end, once every file is written and closed. An error,
@@ -257,6 +266,7 @@ def write_edit(
     _check_space(sources, n_out, mix_target.parent)
 
     block = max(1, int(_BLOCK_S * rate))
+    scale = 10 ** (gain_db / 20)
     opened: list[_Track] = []
     mix_tmp = _tmp_path(mix_target)
     mix: sf.SoundFile | None = None
@@ -271,7 +281,7 @@ def write_edit(
             subtype=_MIX_SUBTYPE,
             format=_wav_format(n_out, _MIX_CHANNELS, _MIX_SUBTYPE),
         )
-        written = sum(_write_piece(p, opened, mix, block, rate, settings) for p in pieces)
+        written = sum(_write_piece(p, opened, mix, block, rate, settings, scale) for p in pieces)
         if written != n_out:
             raise RuntimeError(f"Wrote {written} frames instead of {n_out}.")
         for track in opened:

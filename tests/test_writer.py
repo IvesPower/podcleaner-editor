@@ -282,3 +282,44 @@ def test_marker_error_keeps_the_old_mix(tmp_path, monkeypatch):
     assert list(tmp_path.glob("*.tmp")) == []
     for target in targets:
         assert target.read_text(encoding="utf-8") == "old"
+
+
+def test_gain_applies_to_tracks_and_mix(tmp_path):
+    ramp = _ramp() * 0.4
+    a = _wav(tmp_path / "a.wav", ramp)
+    b = _wav(tmp_path / "b.wav", ramp[::-1])
+    tracks = [
+        RenderTrack(a, tmp_path / "out.a.wav", None),
+        RenderTrack(b, tmp_path / "out.b.wav", None),
+    ]
+    plan = _plan([(0.4, 0.6)], fade_ms=30)
+    write_edit(tracks, plan, 1000, tmp_path / "plain.mix.wav", _settings(30))
+    plain_a = _read(tmp_path / "out.a.wav")
+    plain_b = _read(tmp_path / "out.b.wav")
+    plain_mix = _read(tmp_path / "plain.mix.wav")
+    write_edit(tracks, plan, 1000, tmp_path / "out.mix.wav", _settings(30), gain_db=6.0206)
+    np.testing.assert_allclose(_read(tmp_path / "out.a.wav"), 2 * plain_a, atol=1e-5)
+    np.testing.assert_allclose(_read(tmp_path / "out.b.wav"), 2 * plain_b, atol=1e-5)
+    np.testing.assert_allclose(_read(tmp_path / "out.mix.wav"), 2 * plain_mix, atol=1e-5)
+
+
+def test_mix_stays_the_sum_with_gain(tmp_path):
+    a = _wav(tmp_path / "a.wav", _ramp() * 0.3)
+    b = _wav(tmp_path / "b.wav", np.stack([_ramp(), _ramp()[::-1]], axis=1) * 0.2)
+    tracks = [
+        RenderTrack(a, tmp_path / "out.a.wav", (I(0, 600),)),
+        RenderTrack(b, tmp_path / "out.b.wav", None),
+    ]
+    write_edit(
+        tracks,
+        _plan([(0.4, 0.6)], fade_ms=30),
+        1000,
+        tmp_path / "out.mix.wav",
+        _settings(30),
+        gain_db=-3.5,
+    )
+    left = _read(tmp_path / "out.a.wav")[:, 0] + _read(tmp_path / "out.b.wav")[:, 0]
+    right = _read(tmp_path / "out.a.wav")[:, 0] + _read(tmp_path / "out.b.wav")[:, 1]
+    mix = _read(tmp_path / "out.mix.wav")
+    np.testing.assert_allclose(mix[:, 0], left, atol=1e-6)
+    np.testing.assert_allclose(mix[:, 1], right, atol=1e-6)
