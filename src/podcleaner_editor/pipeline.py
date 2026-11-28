@@ -467,7 +467,8 @@ def _render_with_sound(
         voices = [processed[t.label] for t in episode.voices]
         raw_film = episode.film.info.path
         # The film to the voices' level first, so its loud clips do not hold the gain.
-        fg = film_gain(measure(voices), measure([raw_film]))
+        clips = any(e.type == EventType.FILM_CLIP for e in result.events)
+        fg = film_gain(measure(voices), befores[len(voices)], has_clips=clips)
         level = measure([*voices, raw_film], gains_db=[0.0] * len(voices) + [fg])
         gain = settings.sound_target_lufs - level.lufs if level.lufs > SILENCE_LUFS else 0.0
         progress("Levelling the tracks…")

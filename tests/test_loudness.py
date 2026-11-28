@@ -107,3 +107,8 @@ def test_film_gain_of_silence_is_zero():
     silence = Loudness(-70.0, float("-inf"))
     assert film_gain(silence, Loudness(-14, -1)) == 0.0
     assert film_gain(Loudness(-20, -6), silence) == 0.0
+
+
+def test_film_gain_without_film_clips_is_zero():
+    # A noisy film track with no clip found is not raised to the voices.
+    assert film_gain(Loudness(-20, -6), Loudness(-40, -25), has_clips=False) == 0.0

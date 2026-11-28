@@ -750,7 +750,6 @@ def test_run_processes_the_voices_not_the_film(tmp_path, monkeypatch):
         ["film.wav"],
         raw,  # every raw measure before the write
         [".ep.franck.sound.tmp.wav", ".ep.julien.sound.tmp.wav"],  # the processed voices
-        ["film.wav"],
         [".ep.franck.sound.tmp.wav", ".ep.julien.sound.tmp.wav", "film.wav"],
         sorted(limited),  # after the limiter on each track
         sorted(limited),  # after the make-up gain and the linked limiter
@@ -794,6 +793,18 @@ def test_loud_film_is_brought_to_the_voices(tmp_path, monkeypatch):
     spoken = measure([out / "ep.julien.wav", out / "ep.franck.wav"])
     assert measure([out / "ep.film.wav"]).lufs == pytest.approx(spoken.lufs, abs=1.0)
     assert measure([out / "ep.mix.wav"]).lufs == pytest.approx(-16.0, abs=0.5)
+
+
+def test_film_without_clips_keeps_its_level(tmp_path, monkeypatch):
+    # The film's 0.5 sine would be lowered 12 dB, but no clip was found: it is not a clip.
+    monkeypatch.setattr(pipeline, "film_clips", lambda *args: [])
+    voices = (
+        _voice(tmp_path / "julien.wav", 30, [(2, 8)], amp=0.125),
+        _voice(tmp_path / "franck.wav", 30, [(12, 16)], amp=0.125),
+    )
+    out = _sound_run(tmp_path, monkeypatch, voices=voices)
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert " · film +0.0 dB · " in _sound_lines(text)[0]
 
 
 def _clicky_voice(tmp_path):

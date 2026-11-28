@@ -75,9 +75,10 @@ def shared_gain(loudness: Loudness, target_lufs: float, true_peak_db: float) -> 
     return gain, False
 
 
-def film_gain(voices: Loudness, film: Loudness) -> float:
+def film_gain(voices: Loudness, film: Loudness, has_clips: bool = True) -> float:
     """The gain in dB that brings the film to the voices' loudness, within
-    [`FILM_GAIN_MIN_DB`, `FILM_GAIN_MAX_DB`]; 0 when either is silence."""
-    if voices.lufs <= SILENCE_LUFS or film.lufs <= SILENCE_LUFS:
+    [`FILM_GAIN_MIN_DB`, `FILM_GAIN_MAX_DB`]; 0 when either is silence, or when the film has
+    no clips (`has_clips`), so a track of mere noise is not raised to the voices."""
+    if not has_clips or voices.lufs <= SILENCE_LUFS or film.lufs <= SILENCE_LUFS:
         return 0.0
     return min(max(voices.lufs - film.lufs, FILM_GAIN_MIN_DB), FILM_GAIN_MAX_DB)
