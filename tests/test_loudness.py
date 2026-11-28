@@ -1,7 +1,8 @@
 import numpy as np
+import pytest
 import soundfile as sf
 
-from podcleaner_editor.sound.loudness import Loudness, measure, shared_gain
+from podcleaner_editor.sound.loudness import Loudness, film_gain, measure, shared_gain
 
 
 def _sine(path, amplitude=0.1, seconds=10, sr=48000, channels=1):
@@ -74,3 +75,35 @@ def test_shared_gain_is_lowered_for_the_true_peak():
 
 def test_shared_gain_of_silence_is_zero():
     assert shared_gain(Loudness(-70.0, float("-inf")), -16, -1) == (0.0, False)
+
+
+def test_measure_applies_a_gain_to_each_input(tmp_path):
+    a = _sine(tmp_path / "a.wav")
+    plain, lowered = measure([a]), measure([a], gains_db=[-6.0206])
+    assert lowered.lufs == pytest.approx(plain.lufs - 6.0206, abs=0.1)
+    assert lowered.true_peak_db == pytest.approx(plain.true_peak_db - 6.0206, abs=0.1)
+
+
+def test_measure_with_gains_matches_the_scaled_sum(tmp_path):
+    a = _sine(tmp_path / "a.wav", amplitude=0.1)
+    b = _sine(tmp_path / "b.wav", amplitude=0.2)
+    halved = _sine(tmp_path / "h.wav", amplitude=0.1)
+    assert measure([a, b], gains_db=[0.0, -6.0206]).lufs == pytest.approx(
+        measure([a, halved]).lufs, abs=0.1
+    )
+
+
+def test_film_gain_brings_the_film_to_the_voices():
+    assert film_gain(Loudness(-20, -6), Loudness(-14, -1)) == pytest.approx(-6.0)
+
+
+def test_film_gain_is_clamped():
+    assert film_gain(Loudness(-20, -6), Loudness(-40, -25)) == 10.0
+    assert film_gain(Loudness(-10, -1), Loudness(-5, 0)) == -5.0
+    assert film_gain(Loudness(-40, -20), Loudness(-10, -1)) == -20.0
+
+
+def test_film_gain_of_silence_is_zero():
+    silence = Loudness(-70.0, float("-inf"))
+    assert film_gain(silence, Loudness(-14, -1)) == 0.0
+    assert film_gain(Loudness(-20, -6), silence) == 0.0

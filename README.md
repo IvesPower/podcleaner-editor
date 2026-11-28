@@ -27,7 +27,7 @@ A command-line tool that does the repetitive part of editing a podcast episode, 
 
 ## Outputs
 
-- The voice tracks, gated like Logic Pro's Strip Silence (digital silence where the person is not speaking), and the film track, all cut at the same points with a crossfade at each join so they stay in sync, and a stereo mix (a plain sum of the tracks), all at the same gain: -16 LUFS and -1 dBTP for the mix.
+- The voice tracks, gated like Logic Pro's Strip Silence (digital silence where the person is not speaking), and the film track, all cut at the same points with a crossfade at each join so they stay in sync, and a stereo mix (a plain sum of the tracks), all at one shared gain, the film first brought to the voices' level: -16 LUFS and -1 dBTP for the mix.
 - One Markdown edit file per episode: timecodes (on the original and on the final audio) and a report (loudness before and after, what was removed, what was flagged).
 - Markers as a MIDI file and inside the mix WAV, for Logic Pro and Cakewalk.
 
@@ -87,9 +87,9 @@ A 2 h 10 episode weighs about 2.3 GB per track; the program checks the free disk
 
 ### Studio sound
 
-Each voice track goes through DeepFilterNet 3 (noise and short reverb), then ffmpeg filters (high-pass, EQ, compressor); the film track is left as it is. One gain, shared by every track and the mix, brings the mix to -16 LUFS without passing -1 dBTP; when the true peak stops it short of the target, the edit file says so. The first run downloads the DeepFilterNet model once. `--dry-run` does no sound processing.
+Each voice track goes through DeepFilterNet 3 (noise and short reverb), then ffmpeg filters (high-pass, EQ, compressor); the film track is left as it is, only brought by its own gain to the voices' loudness, so its clips play at the level of the speech. Then one gain, shared by every track and the mix, brings the mix to -16 LUFS without passing -1 dBTP; when the true peak stops it short of the target, the edit file says so. The first run downloads the DeepFilterNet model once. `--dry-run` does no sound processing.
 
-The `### Sound` section of the edit file gives the chain, the gain, and the loudness and true peak of each file before and after. The `[sound]` section of the configuration sets it: `enabled`, `denoise` (`false` keeps the ffmpeg filters only), `filters` (the ffmpeg filter chain, to tune by ear), `target_lufs` (-16.0) and `true_peak_db` (-1.0).
+The `### Sound` section of the edit file gives the chain, the film gain, the shared gain, and the loudness and true peak of each file before and after. The `[sound]` section of the configuration sets it: `enabled`, `denoise` (`false` keeps the ffmpeg filters only), `filters` (the ffmpeg filter chain, to tune by ear), `target_lufs` (-16.0) and `true_peak_db` (-1.0).
 
 Coming next: Claude's opinions (M5).
 

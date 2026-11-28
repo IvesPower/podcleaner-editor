@@ -28,7 +28,7 @@ Essais du 28 nov. 2026, sur la piste de Julien :
 ## Objectifs
 
 - Une **chaîne par piste de voix** (ou une seule pour les voix mélangées) : DeepFilterNet (bruit et réverb), puis filtres ffmpeg (passe-haut, égalisation, compresseur, adoucissement des aigus).
-- Un **mixage à -16 LUFS et -1 dBTP**, par un seul gain appliqué à toutes les pistes : le mixage reste la somme des pistes, comme au M3.
+- Un **mixage à -16 LUFS et -1 dBTP** : le film reçoit d'abord son propre gain jusqu'au volume des voix, puis un seul gain est appliqué à toutes les pistes ; le mixage reste la somme des pistes, comme au M3.
 - Les **mesures avant et après** (LUFS et true peak) par piste dans le fichier de montage, comme le demande le cahier des charges.
 - Une chaîne **réglable sans toucher au code** : les filtres ffmpeg sont une clé de la configuration, pour régler à l'oreille.
 
@@ -75,15 +75,16 @@ La piste film n'est pas traitée. La porte et les coupes du M3 s'appliquent ensu
 
 ### Le volume
 
-- On mesure (ffmpeg `ebur128`, true peak) la somme des voix traitées et du film, avant les coupes : les blancs ne comptent presque pas dans un volume intégré mesuré avec ses seuils.
-- Gain commun = `target_lufs - I`, ramené si besoin pour que le true peak de la somme reste sous `true_peak_db` ; le fichier de montage dit alors que le volume visé n'est pas atteint.
-- L'écriture du M3 applique ce gain à chaque piste et au mixage (`write_edit(..., gain_db=…)`).
+- On mesure (ffmpeg `ebur128`, true peak) avant les coupes : les blancs ne comptent presque pas dans un volume intégré mesuré avec ses seuils.
+- Gain du film = `I(voix traitées) - I(film brut)`, gardé entre -20 et +10 dB (0 si l'un des deux est silencieux) : les extraits de film passent au niveau des voix, comme chez Auphonic. Sur `samples/pedit`, l'extrait brut est 5,4 LU plus fort que la parole et culmine à -1,0 dBTP ; sans ce gain, le true peak bloquait le gain commun à 0 dB et le mixage à -18,7 LUFS.
+- Gain commun = `target_lufs - I`, `I` mesuré sur la somme des voix traitées et du film à son gain, ramené si besoin pour que le true peak de cette somme reste sous `true_peak_db` ; le fichier de montage dit alors que le volume visé n'est pas atteint.
+- L'écriture du M3 applique le gain du film au film (`RenderTrack(..., gain_db=…)`) et le gain commun à chaque piste, donc au mixage (`write_edit(..., gain_db=…)`).
 - Réglages `[sound]` : `enabled = true`, `denoise = true`, `filters` (ci-dessus), `target_lufs = -16.0`, `true_peak_db = -1.0`.
 
 ### Le fichier de montage
 
 Une nouvelle section `### Sound` :
-- la chaîne (`DeepFilterNet 3 + filters` ou `filters only`, ou `Not processed` si `enabled = false`), le gain appliqué ;
+- la chaîne (`DeepFilterNet 3 + filters` ou `filters only`, ou `Not processed` si `enabled = false`), le gain du film et le gain commun appliqués ;
 - un tableau par piste écrite et pour le mixage : LUFS et true peak avant (le brut) et après (le fichier écrit).
 
 ### Disque et temps

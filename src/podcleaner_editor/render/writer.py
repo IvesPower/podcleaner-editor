@@ -46,13 +46,15 @@ class RenderTrack:
     """A track to cut into `target`, with its gate's open passages (`None`: no gate).
 
     `target` is written in `subtype` (`None`: the source's), so a processed float copy of a
-    raw track can be written in the raw track's subtype.
+    raw track can be written in the raw track's subtype. `gain_db` is this track's own gain,
+    on top of the gain `write_edit` gives every track.
     """
 
     source: Path
     target: Path
     gate: tuple[Interval, ...] | None
     subtype: str | None = None
+    gain_db: float = 0.0
 
 
 def check_renderable(sources: list[Path]) -> int:
@@ -132,8 +134,9 @@ def _tmp_path(target: Path) -> Path:
 class _Track:
     """An open source and its temporary output, with the faded tail held for the next join."""
 
-    def __init__(self, track: RenderTrack, n_out: int) -> None:
+    def __init__(self, track: RenderTrack, n_out: int, gain_db: float = 0.0) -> None:
         self.gate = list(track.gate) if track.gate is not None else None
+        self.scale = 10 ** ((gain_db + track.gain_db) / 20)
         self.tmp = _tmp_path(track.target)
         self.target = track.target
         self.held = np.zeros((0, 1), dtype=np.float32)
@@ -183,10 +186,9 @@ def _write_piece(
     block: int,
     rate: int,
     settings: Settings,
-    scale: float = 1.0,
 ) -> int:
-    """Write one piece to every track and to the mix, each track times `scale`; return the
-    frames written."""
+    """Write one piece to every track and to the mix, each track times its scale; return
+    the frames written."""
     first = piece.start - piece.fade_in
     length = piece.end + piece.fade_out - first
     head = 2 * piece.fade_in
@@ -210,9 +212,9 @@ def _write_piece(
                     settings.gate_release_s,
                 )
                 data *= gain[:, None]
-            if scale != 1.0:
+            if track.scale != 1.0:
                 # The fades are linear, so scaling here equals scaling after them.
-                data *= scale
+                data *= track.scale
             # Positions within the piece, not within the block, index the fades.
             chunks: list[np.ndarray] = []
             if a < head:
@@ -263,8 +265,9 @@ def write_edit(
     """Write every cut track and their stereo mix in one streamed pass; return `n_out` and
     whether the `markers` went into the mix (False when it is RF64 or would pass 4 GiB).
 
-    Every track, and so the mix, is multiplied by `gain_db` (in dB) after the gate and the
-    fades and before any integer clipping; the mix stays the sum of the written tracks.
+    Every track, and so the mix, is multiplied by `gain_db` (in dB), and each track by its
+    own `RenderTrack.gain_db`, after the gate and the fades and before any integer clipping;
+    the mix stays the sum of the written tracks.
 
     Each output is first written to `<target>.tmp`, the markers added to the mix's; the
     targets are replaced only at the end, once every file is written and closed. An error,
@@ -284,13 +287,12 @@ def write_edit(
     _require_space(estimate, mix_target.parent)
 
     block = max(1, int(_BLOCK_S * rate))
-    scale = 10 ** (gain_db / 20)
     opened: list[_Track] = []
     mix_tmp = _tmp_path(mix_target)
     mix: sf.SoundFile | None = None
     try:
         for track in tracks:
-            opened.append(_Track(track, n_out))
+            opened.append(_Track(track, n_out, gain_db))
         mix = sf.SoundFile(
             mix_tmp,
             "w",
@@ -299,7 +301,7 @@ def write_edit(
             subtype=_MIX_SUBTYPE,
             format=_wav_format(n_out, _MIX_CHANNELS, _MIX_SUBTYPE),
         )
-        written = sum(_write_piece(p, opened, mix, block, rate, settings, scale) for p in pieces)
+        written = sum(_write_piece(p, opened, mix, block, rate, settings) for p in pieces)
         if written != n_out:
             raise RuntimeError(f"Wrote {written} frames instead of {n_out}.")
         for track in opened:

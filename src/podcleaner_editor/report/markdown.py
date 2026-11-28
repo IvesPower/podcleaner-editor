@@ -20,13 +20,15 @@ _LEFT_OUT_MIN_S = 0.001
 
 @dataclass(frozen=True)
 class SoundInfo:
-    """What the studio sound did: the chain, the shared gain and each file's loudness.
+    """What the studio sound did: the chain, the film's own gain, the shared gain and each
+    file's loudness.
 
     Each row is (file name, loudness of its raw source, loudness of the written file); the
     mix's raw source is the sum of the raw tracks.
     """
 
     chain: str
+    film_gain_db: float
     gain_db: float
     capped: bool
     rows: tuple[tuple[str, Loudness, Loudness], ...]
@@ -134,7 +136,10 @@ def _sound(result: AnalysisResult) -> list[str]:
     sound = result.sound
     if sound is None:
         return ["Not processed: [sound] enabled = false."]
-    head = f"{sound.chain} · gain {sound.gain_db:+.1f} dB · target {sound.target_lufs:.1f} LUFS."
+    head = (
+        f"{sound.chain} · film {sound.film_gain_db:+.1f} dB · gain {sound.gain_db:+.1f} dB · "
+        f"target {sound.target_lufs:.1f} LUFS."
+    )
     if sound.capped:
         head += f" Target not reached: true peak held at {sound.true_peak_db:.1f} dBTP."
     lines = [head, "", "| File | Before | After |", "| --- | --- | --- |"]

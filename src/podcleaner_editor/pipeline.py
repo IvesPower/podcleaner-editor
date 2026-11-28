@@ -46,7 +46,7 @@ from podcleaner_editor.render.writer import (
 from podcleaner_editor.report.markdown import AnalysisResult, SoundInfo, render_edit_file
 from podcleaner_editor.sound.denoise import Denoiser, denoise_file, make_denoiser
 from podcleaner_editor.sound.filters import apply_filters
-from podcleaner_editor.sound.loudness import measure, shared_gain
+from podcleaner_editor.sound.loudness import film_gain, measure, shared_gain
 from podcleaner_editor.timeline import Interval, subtract, union
 
 Decoder = Callable[[Path], np.ndarray]
@@ -364,10 +364,12 @@ def _render(
     progress: Callable[[str], None],
     processed: dict[str, Path] | None = None,
     gain_db: float = 0.0,
+    film_gain_db: float = 0.0,
 ) -> list[Path]:
     """Write the edited tracks, their mix and the markers; return the files written.
 
-    A voice in `processed` is cut from that copy, in its raw file's subtype.
+    A voice in `processed` is cut from that copy, in its raw file's subtype. The film gets
+    `film_gain_db`, then every track `gain_db`.
     """
     episode = result.episode
     name = episode.name
@@ -384,7 +386,10 @@ def _render(
             episode.voices, voice_slugs([t.label for t in episode.voices]), strict=True
         )
     ]
-    tracks.append(RenderTrack(episode.film.info.path, out_dir / f"{name}.film.wav", None))
+    film = RenderTrack(
+        episode.film.info.path, out_dir / f"{name}.film.wav", None, gain_db=film_gain_db
+    )
+    tracks.append(film)
     mix = out_dir / f"{name}.mix.wav"
     midi = out_dir / f"{name}.markers.mid"
 
@@ -408,8 +413,9 @@ def _render_with_sound(
     denoiser: Denoiser | None,
     progress: Callable[[str], None],
 ) -> tuple[list[Path], SoundInfo]:
-    """Process the sound of each voice, then write the edit at the shared gain; return the
-    files written and what the sound stage did. The temporaries are always deleted."""
+    """Process the sound of each voice, then write the edit with the film at the voices' level
+    and every file at the shared gain; return the files written and what the sound stage did.
+    The temporaries are always deleted."""
     episode = result.episode
     n_total, pieces = _plan(result, settings, rate)
     raw = [t.info.path for t in episode.tracks]
@@ -428,12 +434,15 @@ def _render_with_sound(
         # Before the write: once the audio is written, only its own measures remain.
         befores = [measure([path]) for path in raw] + [measure(raw)]
         voices = [processed[t.label] for t in episode.voices]
+        film = episode.film.info.path
+        # The film to the voices' level first, so its loud clips do not hold the shared gain.
+        fg = film_gain(measure(voices), measure([film]))
         gain, capped = shared_gain(
-            measure([*voices, episode.film.info.path]),
+            measure([*voices, film], gains_db=[0.0] * len(voices) + [fg]),
             settings.sound_target_lufs,
             settings.sound_true_peak_db,
         )
-        outputs = _render(result, settings, out_dir, pieces, n_total, progress, processed, gain)
+        outputs = _render(result, settings, out_dir, pieces, n_total, progress, processed, gain, fg)
     finally:
         for path in temporaries:
             with contextlib.suppress(OSError):
@@ -446,7 +455,7 @@ def _render_with_sound(
     )
     chain = "DeepFilterNet 3 + filters" if settings.sound_denoise else "filters only"
     info = SoundInfo(
-        chain, gain, capped, rows, settings.sound_target_lufs, settings.sound_true_peak_db
+        chain, fg, gain, capped, rows, settings.sound_target_lufs, settings.sound_true_peak_db
     )
     return outputs, info
 
@@ -463,9 +472,9 @@ def run(
     """Analyses the episode and writes `<out_dir>/<name>.edit.md`, and without `dry_run` the
     edited tracks, their mix and the markers.
 
-    With `[sound] enabled`, each voice gets the studio sound first (the film is kept raw) and
-    every file is written at one shared gain. `denoiser` defaults to `make_denoiser`, created
-    only when a voice is denoised.
+    With `[sound] enabled`, each voice gets the studio sound first (the film is kept raw), the
+    film is brought to the voices' loudness, and every file is written at one shared gain.
+    `denoiser` defaults to `make_denoiser`, created only when a voice is denoised.
 
     Returns the edit file, then the other files written. The edit file is written last.
     """

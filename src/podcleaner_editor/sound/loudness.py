@@ -1,4 +1,5 @@
-"""Loudness (EBU R128 with true peak) of tracks and their sum, and the shared gain."""
+"""Loudness (EBU R128 with true peak) of tracks and their sum, the film gain and the shared
+gain."""
 
 import math
 import re
@@ -9,6 +10,9 @@ from podcleaner_editor.audio_io import _run, probe
 from podcleaner_editor.errors import EditorError
 
 SILENCE_LUFS = -70.0
+# Range of the gain that brings the film to the voices.
+FILM_GAIN_MIN_DB = -20.0
+FILM_GAIN_MAX_DB = 10.0
 _INTEGRATED = re.compile(r"^\s*I:\s*(-?inf|-?[\d.]+)\s*LUFS", re.MULTILINE)
 _PEAK = re.compile(r"True peak:.*?^\s*Peak:\s*(-?inf|-?[\d.]+)\s*dBFS", re.MULTILINE | re.DOTALL)
 
@@ -19,8 +23,9 @@ class Loudness:
     true_peak_db: float
 
 
-def measure(paths: list[Path]) -> Loudness:
-    """Integrated loudness and true peak of one file, or of the sum of several.
+def measure(paths: list[Path], gains_db: list[float] | None = None) -> Loudness:
+    """Integrated loudness and true peak of one file, or of the sum of several, each input
+    first multiplied by its gain in `gains_db` (default: all 0 dB).
 
     Measured as the mix is written: the writer copies a mono track to both channels at
     full level, so every input is brought to stereo that way (mono: `pan=stereo|c0=c0|c1=c0`)
@@ -28,15 +33,19 @@ def measure(paths: list[Path]) -> Loudness:
     """
     if not paths:
         raise EditorError("Nothing to measure.")
+    gains_db = [0.0] * len(paths) if gains_db is None else gains_db
+    if len(gains_db) != len(paths):
+        raise ValueError(f"{len(gains_db)} gains for {len(paths)} files.")
     args = ["ffmpeg", "-nostdin", "-nostats", "-hide_banner"]
     for path in paths:
         args += ["-i", path]
     prep = ""
-    for i, path in enumerate(paths):
+    for i, (path, gain) in enumerate(zip(paths, gains_db, strict=True)):
+        volume = f"volume={gain}dB," if gain != 0.0 else ""
         if probe(path).channels == 1:
-            prep += f"[{i}:a]pan=stereo|c0=c0|c1=c0[c{i}];"
+            prep += f"[{i}:a]{volume}pan=stereo|c0=c0|c1=c0[c{i}];"
         else:
-            prep += f"[{i}:a]anull[c{i}];"
+            prep += f"[{i}:a]{volume}anull[c{i}];"
     inputs = "".join(f"[c{i}]" for i in range(len(paths)))
     if len(paths) > 1:
         chain = f"{prep}{inputs}amix=inputs={len(paths)}:normalize=0,ebur128=peak=true[out]"
@@ -64,3 +73,11 @@ def shared_gain(loudness: Loudness, target_lufs: float, true_peak_db: float) -> 
     if not math.isinf(loudness.true_peak_db) and loudness.true_peak_db + gain > true_peak_db:
         return true_peak_db - loudness.true_peak_db, True
     return gain, False
+
+
+def film_gain(voices: Loudness, film: Loudness) -> float:
+    """The gain in dB that brings the film to the voices' loudness, within
+    [`FILM_GAIN_MIN_DB`, `FILM_GAIN_MAX_DB`]; 0 when either is silence."""
+    if voices.lufs <= SILENCE_LUFS or film.lufs <= SILENCE_LUFS:
+        return 0.0
+    return min(max(voices.lufs - film.lufs, FILM_GAIN_MIN_DB), FILM_GAIN_MAX_DB)

@@ -27,7 +27,7 @@ Le mode `--dry-run` écrit le rapport et les timecodes sans toucher à l'audio.
 
 ## Sorties
 
-- Les pistes de voix, passées à la porte comme Strip Silence de Logic Pro (silence numérique là où la personne ne parle pas), et la piste film, toutes coupées aux mêmes endroits avec un fondu enchaîné à chaque raccord pour rester synchronisées, plus un mixage stéréo (une simple somme des pistes), le tout au même gain : -16 LUFS et -1 dBTP pour le mixage.
+- Les pistes de voix, passées à la porte comme Strip Silence de Logic Pro (silence numérique là où la personne ne parle pas), et la piste film, toutes coupées aux mêmes endroits avec un fondu enchaîné à chaque raccord pour rester synchronisées, plus un mixage stéréo (une simple somme des pistes), le tout à un seul gain commun, le film d'abord amené au niveau des voix : -16 LUFS et -1 dBTP pour le mixage.
 - Un fichier de montage Markdown par épisode : les timecodes (sur l'audio original et sur l'audio final) et un rapport (loudness avant et après, ce qui a été retiré, ce qui a été signalé).
 - Des marqueurs dans un fichier MIDI et dans le WAV du mixage, pour Logic Pro et Cakewalk.
 
@@ -87,9 +87,9 @@ Un épisode de 2 h 10 pèse environ 2,3 Go par piste ; le programme vérifie d'a
 
 ### Son studio
 
-Chaque piste de voix passe par DeepFilterNet 3 (bruit et réverb courte), puis par des filtres ffmpeg (passe-haut, EQ, compresseur) ; la piste film reste telle quelle. Un seul gain, commun à toutes les pistes et au mixage, amène le mixage à -16 LUFS sans dépasser -1 dBTP ; quand le pic réel l'arrête avant la cible, le fichier de montage le dit. Le premier lancement télécharge une fois le modèle DeepFilterNet. `--dry-run` ne fait aucun traitement du son.
+Chaque piste de voix passe par DeepFilterNet 3 (bruit et réverb courte), puis par des filtres ffmpeg (passe-haut, EQ, compresseur) ; la piste film reste telle quelle, seulement amenée par son propre gain au volume des voix, pour que ses extraits passent au niveau de la parole. Puis un seul gain, commun à toutes les pistes et au mixage, amène le mixage à -16 LUFS sans dépasser -1 dBTP ; quand le pic réel l'arrête avant la cible, le fichier de montage le dit. Le premier lancement télécharge une fois le modèle DeepFilterNet. `--dry-run` ne fait aucun traitement du son.
 
-La section `### Sound` du fichier de montage donne la chaîne, le gain, et le volume et le pic réel de chaque fichier avant et après. La section `[sound]` de la configuration la règle : `enabled`, `denoise` (`false` garde les seuls filtres ffmpeg), `filters` (la chaîne de filtres ffmpeg, à régler à l'oreille), `target_lufs` (-16,0) et `true_peak_db` (-1,0).
+La section `### Sound` du fichier de montage donne la chaîne, le gain du film, le gain commun, et le volume et le pic réel de chaque fichier avant et après. La section `[sound]` de la configuration la règle : `enabled`, `denoise` (`false` garde les seuls filtres ffmpeg), `filters` (la chaîne de filtres ffmpeg, à régler à l'oreille), `target_lufs` (-16,0) et `true_peak_db` (-1,0).
 
 À venir : les avis de Claude (M5).
 

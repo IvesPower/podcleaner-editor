@@ -236,6 +236,7 @@ def test_duration_section():
 def test_sound_section_when_the_true_peak_holds_the_gain():
     sound = SoundInfo(
         "filters only",
+        -5.44,
         4.25,
         True,
         (
@@ -249,7 +250,7 @@ def test_sound_section_when_the_true_peak_holds_the_gain():
     text = render_edit_file(result, "0.1.0", DAY)
     assert (
         "### Sound\n\n"
-        "filters only · gain +4.2 dB · target -16.0 LUFS. "
+        "filters only · film -5.4 dB · gain +4.2 dB · target -16.0 LUFS. "
         "Target not reached: true peak held at -1.0 dBTP.\n\n"
         "| File | Before | After |\n"
         "| --- | --- | --- |\n"

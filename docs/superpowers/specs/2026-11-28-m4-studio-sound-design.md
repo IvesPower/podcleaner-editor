@@ -28,7 +28,7 @@ Trials of Nov 28, 2026, on Julien's track:
 ## Goals
 
 - A **chain per voice track** (or one for mixed voices): DeepFilterNet (noise and reverb), then ffmpeg filters (high-pass, EQ, compressor, softer highs).
-- A **mix at -16 LUFS and -1 dBTP**, through one gain applied to every track: the mix stays the sum of the tracks, as in M3.
+- A **mix at -16 LUFS and -1 dBTP**: the film first gets its own gain to the voices' loudness, then one gain is applied to every track; the mix stays the sum of the tracks, as in M3.
 - **Before and after measurements** (LUFS and true peak) per track in the edit file, as the spec asks.
 - A chain **tunable without touching the code**: the ffmpeg filters are a configuration key, to tune by ear.
 
@@ -75,15 +75,16 @@ The film track is not processed. The M3 gate and cuts then apply unchanged; the 
 
 ### Loudness
 
-- Measure (ffmpeg `ebur128`, true peak) the sum of the processed voices and the film, before the cuts: silences barely count in an integrated loudness measured with its gates.
-- Shared gain = `target_lufs - I`, lowered if needed so the true peak of the sum stays under `true_peak_db`; the edit file then says the target was not reached.
-- The M3 writer applies this gain to each track and to the mix (`write_edit(..., gain_db=…)`).
+- Measure (ffmpeg `ebur128`, true peak) before the cuts: silences barely count in an integrated loudness measured with its gates.
+- Film gain = `I(processed voices) - I(raw film)`, kept within -20 to +10 dB (0 when either is silent): the film clips play at the voices' level, as Auphonic does. On `samples/pedit` the raw film clip is 5.4 LU louder than the speech and peaks at -1.0 dBTP; without this gain the true peak held the shared gain at 0 dB and the mix at -18.7 LUFS.
+- Shared gain = `target_lufs - I`, `I` measured on the sum of the processed voices and the film at its film gain, lowered if needed so the true peak of that sum stays under `true_peak_db`; the edit file then says the target was not reached.
+- The M3 writer applies the film gain to the film (`RenderTrack(..., gain_db=…)`) and the shared gain to each track and so to the mix (`write_edit(..., gain_db=…)`).
 - `[sound]` settings: `enabled = true`, `denoise = true`, `filters` (above), `target_lufs = -16.0`, `true_peak_db = -1.0`.
 
 ### The edit file
 
 A new `### Sound` section:
-- the chain (`DeepFilterNet 3 + filters`, `filters only`, or `Not processed` when `enabled = false`) and the gain applied;
+- the chain (`DeepFilterNet 3 + filters`, `filters only`, or `Not processed` when `enabled = false`) the film gain and the shared gain applied;
 - one table row per written track and for the mix: LUFS and true peak before (the raw file) and after (the written file).
 
 ### Disk and time
