@@ -76,7 +76,7 @@ The film track is not processed. The M3 gate and cuts then apply unchanged; the 
 ### Loudness
 
 - Measure (ffmpeg `ebur128`, true peak) before the cuts: silences barely count in an integrated loudness measured with its gates.
-- Film gain = `I(processed voices) - I(raw film)`, kept within -20 to +10 dB (0 when either is silent): the film clips play at the voices' level, as Auphonic does. On `samples/pedit` the raw film clip is 5.4 LU louder than the speech and peaks at -1.0 dBTP; without this gain the true peak held the shared gain at 0 dB and the mix at -18.7 LUFS.
+- Film gain = `I(processed voices) - I(raw film)`, kept within -20 to +10 dB (0 when either is silent, or when the analysis found no film clip, so a track of mere noise is not raised): the film clips play at the voices' level, as Auphonic does. On `samples/pedit` the raw film clip is 5.4 LU louder than the speech and peaks at -1.0 dBTP; without this gain the true peak held the shared gain at 0 dB and the mix at -18.7 LUFS.
 - Gain `g = target_lufs - I`, `I` measured on the sum of the processed voices and the film at its film gain. A loud passage would make the true peak hold `g` (on `samples/pedit`, a moment where both mics peak together held the mix at -17.7 LUFS), so the tracks are limited, as Auphonic does:
   - each voice at `g` and the raw film at `film gain + g` go through `volume=…dB,alimiter=limit=…:attack=5:release=50:level=disabled:latency=1` (ffmpeg) into float temporaries; the limit is a sample peak 0.5 dB under `true_peak_db`, and `latency=1` removes the limiter's 5 ms delay, so the tracks stay on the analysis timecodes;
   - the limiters take some loudness off the peaks: a make-up gain `target_lufs - I(limited sum)` is applied to every temporary in place, and a limiter linked across the tracks lowers them all by one gain wherever their sum still peaks above the same limit (the gain ramps over 5 ms on each side of a peak), so the mix stays the sum of the tracks; it edits only the samples of the float temporaries, block by block, opening each file just for the block at hand, so an error never leaves one open;
@@ -93,7 +93,7 @@ A new `### Sound` section:
 ### Disk and time
 
 - The space check also counts the sound's temporary files.
-- Progress: `Processing the sound of <voice>… (the DeepFilterNet model is downloaded on first use)`, then `Measuring the loudness…` and `Levelling the tracks…`.
+- Progress: `Processing the sound of <voice>… (the DeepFilterNet model is downloaded on first use)`, then `Measuring the loudness…`, `Levelling the tracks…`, and after the write `Measuring the loudness of the written files…`.
 
 ## Left to the builder
 

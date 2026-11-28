@@ -76,7 +76,7 @@ La piste film n'est pas traitée. La porte et les coupes du M3 s'appliquent ensu
 ### Le volume
 
 - On mesure (ffmpeg `ebur128`, true peak) avant les coupes : les blancs ne comptent presque pas dans un volume intégré mesuré avec ses seuils.
-- Gain du film = `I(voix traitées) - I(film brut)`, gardé entre -20 et +10 dB (0 si l'un des deux est silencieux) : les extraits de film passent au niveau des voix, comme chez Auphonic. Sur `samples/pedit`, l'extrait brut est 5,4 LU plus fort que la parole et culmine à -1,0 dBTP ; sans ce gain, le true peak bloquait le gain commun à 0 dB et le mixage à -18,7 LUFS.
+- Gain du film = `I(voix traitées) - I(film brut)`, gardé entre -20 et +10 dB (0 si l'un des deux est silencieux, ou si l'analyse n'a trouvé aucun extrait de film, pour qu'une piste de simple bruit ne soit pas montée) : les extraits de film passent au niveau des voix, comme chez Auphonic. Sur `samples/pedit`, l'extrait brut est 5,4 LU plus fort que la parole et culmine à -1,0 dBTP ; sans ce gain, le true peak bloquait le gain commun à 0 dB et le mixage à -18,7 LUFS.
 - Gain `g = target_lufs - I`, `I` mesuré sur la somme des voix traitées et du film à son gain. Un passage fort ferait bloquer `g` par le true peak (sur `samples/pedit`, un moment où les deux micros culminent ensemble bloquait le mixage à -17,7 LUFS) : les pistes passent donc par un limiteur, comme chez Auphonic :
   - chaque voix à `g` et le film brut à `gain du film + g` passent par `volume=…dB,alimiter=limit=…:attack=5:release=50:level=disabled:latency=1` (ffmpeg) vers des fichiers temporaires en flottant ; la limite est un pic d'échantillon 0,5 dB sous `true_peak_db`, et `latency=1` retire le retard de 5 ms du limiteur, pour que les pistes restent sur les timecodes de l'analyse ;
   - les limiteurs retirent un peu de volume aux pics : un gain de rattrapage `target_lufs - I(somme limitée)` est appliqué en place à chaque fichier temporaire, et un limiteur lié entre les pistes les baisse toutes d'un même gain là où leur somme dépasse encore la même limite (le gain varie progressivement sur 5 ms de chaque côté d'un pic), pour que le mixage reste la somme des pistes ; il ne modifie que les échantillons des fichiers temporaires en flottant, bloc par bloc, en n'ouvrant chaque fichier que pour le bloc en cours, pour qu'une erreur n'en laisse jamais un ouvert ;
@@ -93,7 +93,7 @@ Une nouvelle section `### Sound` :
 ### Disque et temps
 
 - La place vérifiée compte aussi les fichiers temporaires du son.
-- Progression : `Processing the sound of <voix>… (the DeepFilterNet model is downloaded on first use)`, puis `Measuring the loudness…` et `Levelling the tracks…`.
+- Progression : `Processing the sound of <voix>… (the DeepFilterNet model is downloaded on first use)`, puis `Measuring the loudness…`, `Levelling the tracks…`, et après l'écriture `Measuring the loudness of the written files…`.
 
 ## Laissé au constructeur
 

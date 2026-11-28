@@ -78,7 +78,7 @@ It also writes, in the same folder:
 
 Each marker is named by its type only: `Requested cut`, `Clip to add`, `Film clip`, `Overlap`, or `Hesitation` for a "euh" that could not be cut. The reasons are in the edit file.
 
-A 2 h 10 episode weighs about 2.3 GB per track; the program checks the free disk space first, and an error leaves no half-written file.
+A 2 h 10 episode weighs about 2.3 GB per track. The sound stage also needs float copies of every track on top of the outputs (about 11 GB more for a 2 h 10 stereo float episode, so about 22 GB free in all); the program checks the free disk space first, and an error leaves no half-written file.
 
 ### Importing into Logic Pro
 
@@ -87,7 +87,7 @@ A 2 h 10 episode weighs about 2.3 GB per track; the program checks the free disk
 
 ### Studio sound
 
-Each voice track goes through DeepFilterNet 3 (noise and short reverb), then ffmpeg filters (high-pass, EQ, compressor); the film track is left as it is, only brought by its own gain to the voices' loudness, so its clips play at the level of the speech. Then a limiter on each track, and one linked across them so the mix stays their sum, let one gain, shared by every track and the mix, bring the mix to -16 LUFS without passing -1 dBTP; when the true peak stops it short of the target, the edit file says so. The first run downloads the DeepFilterNet model once. `--dry-run` does no sound processing.
+Each voice track goes through DeepFilterNet 3 (noise and short reverb), then ffmpeg filters (high-pass, EQ, compressor); the film is not processed, only levelled and limited: its own gain brings it to the voices' loudness, so its clips play at the level of the speech (no gain when the analysis found no film clip). Then a limiter on each track, and one linked across them so the mix stays their sum, let one gain, shared by every track and the mix, bring the mix to -16 LUFS without passing -1 dBTP; when the true peak stops it short of the target, the edit file says so. The first run downloads the DeepFilterNet model once. `--dry-run` does no sound processing.
 
 The `### Sound` section of the edit file gives the chain, the film gain, the shared gain, how much the linked limiter lowered (passages, seconds, deepest reduction), and the loudness and true peak of each file before and after. The `[sound]` section of the configuration sets it: `enabled`, `denoise` (`false` keeps the ffmpeg filters only), `filters` (the ffmpeg filter chain, to tune by ear), `target_lufs` (-16.0) and `true_peak_db` (-1.0).
 
