@@ -236,3 +236,10 @@ def test_output_under_the_wav_limit_is_wav(tmp_path):
     sf.write(tmp_path / "in.wav", _band_limited_noise(sr, sr, 1), sr, subtype="PCM_16")
     denoise_file(tmp_path / "in.wav", tmp_path / "out.wav", _Fake())
     assert sf.info(tmp_path / "out.wav").format == "WAV"
+
+
+def test_deepfilternet_imports():
+    # No model and no network: only proves torch, torchaudio and df load on this platform.
+    from df.enhance import enhance, init_df
+
+    assert callable(enhance) and callable(init_df)
