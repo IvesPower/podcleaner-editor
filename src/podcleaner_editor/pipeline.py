@@ -1,5 +1,6 @@
 """The analysis of an episode, from the tracks to the edit file."""
 
+import contextlib
 import re
 import unicodedata
 from collections import Counter
@@ -35,15 +36,26 @@ from podcleaner_editor.episode import Episode
 from podcleaner_editor.errors import EditorError
 from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.render.markers import Marker, write_midi
-from podcleaner_editor.render.splice import splice_plan
-from podcleaner_editor.render.writer import RenderTrack, check_renderable, write_edit
-from podcleaner_editor.report.markdown import AnalysisResult, render_edit_file
+from podcleaner_editor.render.splice import Piece, splice_plan
+from podcleaner_editor.render.writer import (
+    RenderTrack,
+    check_renderable,
+    check_space,
+    write_edit,
+)
+from podcleaner_editor.report.markdown import AnalysisResult, SoundInfo, render_edit_file
+from podcleaner_editor.sound.denoise import Denoiser, denoise_file, make_denoiser
+from podcleaner_editor.sound.filters import apply_filters
+from podcleaner_editor.sound.loudness import measure, shared_gain
 from podcleaner_editor.timeline import Interval, subtract, union
 
 Decoder = Callable[[Path], np.ndarray]
 Vad = Callable[[np.ndarray, Settings], list[Interval]]
 
 _DOWNLOAD_NOTE = " (the Whisper model is downloaded on first use, about 1.6 GB)"
+_DENOISER_NOTE = " (the DeepFilterNet model is downloaded on first use)"
+# Room taken by a WAV header and its chunks, besides the samples.
+_HEADER_BYTES = 4096
 # Float sums are not exact: a piece this close to one level frame counts as one frame.
 _EPSILON = 1e-9
 
@@ -293,22 +305,79 @@ def voice_slugs(labels: Sequence[str]) -> list[str]:
     return numbered
 
 
+def _plan(result: AnalysisResult, settings: Settings, rate: int) -> tuple[int, list[Piece]]:
+    """The episode's length in samples and the pieces of it to keep."""
+    n_total = round(result.episode.duration * rate)
+    return n_total, splice_plan(result.cuts, n_total, rate, settings.fade_ms)
+
+
+def _sound_tmp(out_dir: Path, name: str, slug: str, step: str = "") -> Path:
+    """A temporary sound file of a voice, in the output folder."""
+    return out_dir / f".{name}.{slug}{step}.sound.tmp.wav"
+
+
+def _float_bytes(source: Path) -> int:
+    """Size of a 32-bit float copy of `source`, header included."""
+    info = sf.info(source)
+    return info.frames * info.channels * 4 + _HEADER_BYTES
+
+
+def _process_voices(
+    result: AnalysisResult,
+    settings: Settings,
+    out_dir: Path,
+    temporaries: list[Path],
+    denoiser: Denoiser | None,
+    progress: Callable[[str], None],
+) -> dict[str, Path]:
+    """The studio sound of each voice in a float temporary, by label; every temporary
+    created is added to `temporaries`."""
+    episode = result.episode
+    labels = [track.label for track in episode.voices]
+    processed: dict[str, Path] = {}
+    for i, (track, slug) in enumerate(zip(episode.voices, voice_slugs(labels), strict=True)):
+        note = _DENOISER_NOTE if i == 0 and settings.sound_denoise else ""
+        progress(f"Processing the sound of {track.label}…{note}")
+        source = track.info.path
+        target = _sound_tmp(out_dir, episode.name, slug)
+        temporaries.append(target)
+        if settings.sound_denoise:
+            denoised = _sound_tmp(out_dir, episode.name, slug, ".denoised")
+            temporaries.append(denoised)
+            denoiser = denoiser or make_denoiser()
+            denoise_file(source, denoised, denoiser)
+            apply_filters(denoised, target, settings.sound_filters)
+            denoised.unlink()
+        else:
+            apply_filters(source, target, settings.sound_filters)
+        processed[track.label] = target
+    return processed
+
+
 def _render(
     result: AnalysisResult,
     settings: Settings,
     out_dir: Path,
-    rate: int,
+    pieces: list[Piece],
+    n_total: int,
     progress: Callable[[str], None],
+    processed: dict[str, Path] | None = None,
+    gain_db: float = 0.0,
 ) -> list[Path]:
-    """Write the edited tracks, their mix and the markers; return the files written."""
+    """Write the edited tracks, their mix and the markers; return the files written.
+
+    A voice in `processed` is cut from that copy, in its raw file's subtype.
+    """
     episode = result.episode
     name = episode.name
     gates = result.gates
+    processed = processed or {}
     tracks = [
         RenderTrack(
-            track.info.path,
+            processed.get(track.label, track.info.path),
             out_dir / f"{name}.{slug}.wav",
             gates[track.label] if gates is not None else None,
+            sf.info(track.info.path).subtype,
         )
         for track, slug in zip(
             episode.voices, voice_slugs([t.label for t in episode.voices]), strict=True
@@ -318,18 +387,65 @@ def _render(
     mix = out_dir / f"{name}.mix.wav"
     midi = out_dir / f"{name}.markers.mid"
 
-    n_total = round(episode.duration * rate)
-    pieces = splice_plan(result.cuts, n_total, rate, settings.fade_ms)
     markers = markers_of(result)
     progress("Writing the edited tracks…")
     try:
-        _, marked = write_edit(tracks, pieces, n_total, mix, settings, markers)
+        _, marked = write_edit(tracks, pieces, n_total, mix, settings, markers, gain_db=gain_db)
         if not marked:
             progress(f"⚠ The mix is over 4 GB (RF64): its markers are only in {midi.name}.")
         write_midi(markers, midi)
     except (OSError, sf.SoundFileError) as exc:
         raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
     return [*(t.target for t in tracks), mix, midi]
+
+
+def _render_with_sound(
+    result: AnalysisResult,
+    settings: Settings,
+    out_dir: Path,
+    rate: int,
+    denoiser: Denoiser | None,
+    progress: Callable[[str], None],
+) -> tuple[list[Path], SoundInfo]:
+    """Process the sound of each voice, then write the edit at the shared gain; return the
+    files written and what the sound stage did. The temporaries are always deleted."""
+    episode = result.episode
+    n_total, pieces = _plan(result, settings, rate)
+    raw = [t.info.path for t in episode.tracks]
+    # The processed voices, and one intermediate file at a time when denoising.
+    sizes = [_float_bytes(t.info.path) for t in episode.voices]
+    extra = sum(sizes) + (max(sizes) if settings.sound_denoise and sizes else 0)
+    check_space(raw, sum(p.end - p.start for p in pieces), out_dir, extra_bytes=extra)
+
+    temporaries: list[Path] = []
+    try:
+        try:
+            processed = _process_voices(result, settings, out_dir, temporaries, denoiser, progress)
+        except (OSError, sf.SoundFileError) as exc:
+            raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
+        progress("Measuring the loudness…")
+        voices = [processed[t.label] for t in episode.voices]
+        gain, capped = shared_gain(
+            measure([*voices, episode.film.info.path]),
+            settings.sound_target_lufs,
+            settings.sound_true_peak_db,
+        )
+        outputs = _render(result, settings, out_dir, pieces, n_total, progress, processed, gain)
+    finally:
+        for path in temporaries:
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
+
+    written = outputs[: len(raw) + 1]  # every track, then the mix
+    befores = [measure([path]) for path in raw] + [measure(raw)]
+    rows = tuple(
+        (path.name, before, measure([path])) for path, before in zip(written, befores, strict=True)
+    )
+    chain = "DeepFilterNet 3 + filters" if settings.sound_denoise else "filters only"
+    info = SoundInfo(
+        chain, gain, capped, rows, settings.sound_target_lufs, settings.sound_true_peak_db
+    )
+    return outputs, info
 
 
 def run(
@@ -339,9 +455,14 @@ def run(
     *,
     dry_run: bool,
     progress: Callable[[str], None] = lambda _: None,
+    denoiser: Denoiser | None = None,
 ) -> list[Path]:
     """Analyses the episode and writes `<out_dir>/<name>.edit.md`, and without `dry_run` the
     edited tracks, their mix and the markers.
+
+    With `[sound] enabled`, each voice gets the studio sound first (the film is kept raw) and
+    every file is written at one shared gain. `denoiser` defaults to `make_denoiser`, created
+    only when a voice is denoised.
 
     Returns the edit file, then the other files written. The edit file is written last.
     """
@@ -359,8 +480,14 @@ def run(
         except (OSError, sf.SoundFileError) as exc:
             raise EditorError(f"Could not open the tracks: {exc}") from exc
     result = analyze(episode, settings, cache_path=cache_path, progress=progress)
-    outputs = [] if rate is None else _render(result, settings, out_dir, rate, progress)
-    result = replace(result, dry_run=dry_run, outputs=tuple(outputs))
+    outputs: list[Path] = []
+    sound = None
+    if rate is not None and settings.sound_enabled:
+        outputs, sound = _render_with_sound(result, settings, out_dir, rate, denoiser, progress)
+    elif rate is not None:
+        n_total, pieces = _plan(result, settings, rate)
+        outputs = _render(result, settings, out_dir, pieces, n_total, progress)
+    result = replace(result, dry_run=dry_run, outputs=tuple(outputs), sound=sound)
     try:
         path.write_text(render_edit_file(result, __version__, date.today()), encoding="utf-8")
     except OSError as exc:

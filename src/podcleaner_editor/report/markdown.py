@@ -10,11 +10,28 @@ from podcleaner_editor.cutmap import CutMap
 from podcleaner_editor.detect.fillers import Filler
 from podcleaner_editor.episode import Episode
 from podcleaner_editor.events import Event, EventType
+from podcleaner_editor.sound.loudness import Loudness
 from podcleaner_editor.timeline import Interval, format_tc, merge
 
 _LAYOUT_NAMES = {"separate": "separate tracks", "mixed": "mixed voices"}
 # A track this much longer than the episode or less is not said to be left out at the end.
 _LEFT_OUT_MIN_S = 0.001
+
+
+@dataclass(frozen=True)
+class SoundInfo:
+    """What the studio sound did: the chain, the shared gain and each file's loudness.
+
+    Each row is (file name, loudness of its raw source, loudness of the written file); the
+    mix's raw source is the sum of the raw tracks.
+    """
+
+    chain: str
+    gain_db: float
+    capped: bool
+    rows: tuple[tuple[str, Loudness, Loudness], ...]
+    target_lufs: float
+    true_peak_db: float
 
 
 @dataclass(frozen=True)
@@ -32,6 +49,8 @@ class AnalysisResult:
     gates: dict[str, tuple[Interval, ...]] | None = None
     # The files written besides the edit file (filled in by `run`).
     outputs: tuple[Path, ...] = ()
+    # The studio sound (filled in by `run`); None: dry run, or the sound is not processed.
+    sound: SoundInfo | None = None
 
     @cached_property
     def cuts(self) -> CutMap:
@@ -103,6 +122,25 @@ def _files(result: AnalysisResult) -> list[str]:
     if result.dry_run:
         return ["None: dry run, no audio written."]
     return [f"- {path.name}" for path in result.outputs]
+
+
+def _level(loudness: Loudness) -> str:
+    return f"{loudness.lufs:.1f} LUFS / {loudness.true_peak_db:.1f} dBTP"
+
+
+def _sound(result: AnalysisResult) -> list[str]:
+    if result.dry_run:
+        return ["None: dry run, no audio written."]
+    sound = result.sound
+    if sound is None:
+        return ["Not processed: [sound] enabled = false."]
+    head = f"{sound.chain} · gain {sound.gain_db:+.1f} dB · target {sound.target_lufs:.1f} LUFS."
+    if sound.capped:
+        head += f" Target not reached: true peak held at {sound.true_peak_db:.1f} dBTP."
+    lines = [head, "", "| File | Before | After |", "| --- | --- | --- |"]
+    for name, before, after in sound.rows:
+        lines.append(f"| {_cell(name)} | {_level(before)} | {_level(after)} |")
+    return lines
 
 
 def _silences(result: AnalysisResult) -> str:
@@ -203,6 +241,10 @@ def render_edit_file(result: AnalysisResult, version: str, generated_on: date) -
         "### Tracks",
         "",
         *_tracks(episode),
+        "",
+        "### Sound",
+        "",
+        *_sound(result),
         "",
         "### Silences",
         "",

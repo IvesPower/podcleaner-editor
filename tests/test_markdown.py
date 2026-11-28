@@ -8,7 +8,8 @@ from podcleaner_editor.cutmap import CutMap
 from podcleaner_editor.detect.fillers import Filler
 from podcleaner_editor.episode import Episode, Track
 from podcleaner_editor.events import Event, EventType
-from podcleaner_editor.report.markdown import AnalysisResult, render_edit_file
+from podcleaner_editor.report.markdown import AnalysisResult, SoundInfo, render_edit_file
+from podcleaner_editor.sound.loudness import Loudness
 from podcleaner_editor.timeline import Interval as I
 
 DAY = date(2026, 11, 22)
@@ -230,3 +231,34 @@ def test_duration_section():
         "### Duration\n\nFinal duration: 00:01:12.250 (original: 00:01:14.750), "
         "00:00:02.500 removed.\n"
     ) in text
+
+
+def test_sound_section_when_the_true_peak_holds_the_gain():
+    sound = SoundInfo(
+        "filters only",
+        4.25,
+        True,
+        (
+            ("ep.julien.wav", Loudness(-30.04, -12.0), Loudness(-25.8, -7.75)),
+            ("ep.mix.wav", Loudness(-24.0, -5.0), Loudness(-19.75, -1.0)),
+        ),
+        -16.0,
+        -1.0,
+    )
+    result = AnalysisResult(SEPARATE, [], CutMap(()), False, sound=sound)
+    text = render_edit_file(result, "0.1.0", DAY)
+    assert (
+        "### Sound\n\n"
+        "filters only · gain +4.2 dB · target -16.0 LUFS. "
+        "Target not reached: true peak held at -1.0 dBTP.\n\n"
+        "| File | Before | After |\n"
+        "| --- | --- | --- |\n"
+        "| ep.julien.wav | -30.0 LUFS / -12.0 dBTP | -25.8 LUFS / -7.8 dBTP |\n"
+        "| ep.mix.wav | -24.0 LUFS / -5.0 dBTP | -19.8 LUFS / -1.0 dBTP |\n"
+        "\n### Silences"
+    ) in text
+
+
+def test_sound_section_when_not_processed():
+    text = render_edit_file(AnalysisResult(SEPARATE, [], CutMap(()), False), "0.1.0", DAY)
+    assert "### Sound\n\nNot processed: [sound] enabled = false.\n" in text

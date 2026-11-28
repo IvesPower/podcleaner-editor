@@ -43,11 +43,16 @@ _FLOAT_SUBTYPES = {"FLOAT", "DOUBLE"}
 
 @dataclass(frozen=True)
 class RenderTrack:
-    """A raw track to cut into `target`, with its gate's open passages (`None`: no gate)."""
+    """A track to cut into `target`, with its gate's open passages (`None`: no gate).
+
+    `target` is written in `subtype` (`None`: the source's), so a processed float copy of a
+    raw track can be written in the raw track's subtype.
+    """
 
     source: Path
     target: Path
     gate: tuple[Interval, ...] | None
+    subtype: str | None = None
 
 
 def check_renderable(sources: list[Path]) -> int:
@@ -100,15 +105,24 @@ def _existing_folder(folder: Path) -> Path:
     return folder
 
 
-def _check_space(sources: list[Path], n_out: int, folder: Path) -> None:
-    """`EditorError` when `folder` lacks the room for the outputs, with a margin."""
-    estimate = estimate_bytes(sources, n_out)
+def _require_space(estimate: int, folder: Path) -> None:
+    """`EditorError` when `folder` lacks the room for `estimate` bytes, with a margin."""
     free = shutil.disk_usage(_existing_folder(folder)).free
     if free < _SPACE_MARGIN * estimate:
         raise EditorError(
             f"Not enough disk space in {folder}: about {estimate / 1e9:.1f} GB needed, "
             f"{free / 1e9:.1f} GB free."
         )
+
+
+def check_space(sources: list[Path], n_out: int, folder: Path, extra_bytes: int = 0) -> None:
+    """`EditorError` when `folder` lacks the room for the outputs of `sources` and
+    `extra_bytes` more, with a margin."""
+    _require_space(estimate_bytes(sources, n_out) + extra_bytes, folder)
+
+
+def _output_subtype(track: RenderTrack) -> str:
+    return track.subtype or sf.info(track.source).subtype
 
 
 def _tmp_path(target: Path) -> Path:
@@ -125,7 +139,7 @@ class _Track:
         self.held = np.zeros((0, 1), dtype=np.float32)
         self.reader = sf.SoundFile(track.source)
         self.channels = self.reader.channels
-        subtype = self.reader.subtype
+        subtype = track.subtype or self.reader.subtype
         self.clip = subtype not in _FLOAT_SUBTYPES
         try:
             self.output = sf.SoundFile(
@@ -263,7 +277,11 @@ def write_edit(
     n_out = sum(piece.end - piece.start for piece in pieces)
     if pieces and (pieces[0].start < 0 or pieces[-1].end > n_total):
         raise ValueError(f"Pieces fall outside [0, {n_total}).")
-    _check_space(sources, n_out, mix_target.parent)
+    estimate = _file_bytes(n_out, _MIX_CHANNELS, _MIX_SUBTYPE) + sum(
+        _file_bytes(n_out, sf.info(track.source).channels, _output_subtype(track))
+        for track in tracks
+    )
+    _require_space(estimate, mix_target.parent)
 
     block = max(1, int(_BLOCK_S * rate))
     scale = 10 ** (gain_db / 20)
