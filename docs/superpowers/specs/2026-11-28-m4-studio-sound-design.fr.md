@@ -79,7 +79,7 @@ La piste film n'est pas traitée. La porte et les coupes du M3 s'appliquent ensu
 - Gain du film = `I(voix traitées) - I(film brut)`, gardé entre -20 et +10 dB (0 si l'un des deux est silencieux) : les extraits de film passent au niveau des voix, comme chez Auphonic. Sur `samples/pedit`, l'extrait brut est 5,4 LU plus fort que la parole et culmine à -1,0 dBTP ; sans ce gain, le true peak bloquait le gain commun à 0 dB et le mixage à -18,7 LUFS.
 - Gain `g = target_lufs - I`, `I` mesuré sur la somme des voix traitées et du film à son gain. Un passage fort ferait bloquer `g` par le true peak (sur `samples/pedit`, un moment où les deux micros culminent ensemble bloquait le mixage à -17,7 LUFS) : les pistes passent donc par un limiteur, comme chez Auphonic :
   - chaque voix à `g` et le film brut à `gain du film + g` passent par `volume=…dB,alimiter=limit=…:attack=5:release=50:level=disabled:latency=1` (ffmpeg) vers des fichiers temporaires en flottant ; la limite est un pic d'échantillon 0,5 dB sous `true_peak_db`, et `latency=1` retire le retard de 5 ms du limiteur, pour que les pistes restent sur les timecodes de l'analyse ;
-  - les limiteurs retirent un peu de volume aux pics : un gain de rattrapage `target_lufs - I(somme limitée)` est appliqué en place à chaque fichier temporaire, et un limiteur lié entre les pistes les baisse toutes d'un même gain là où leur somme dépasse encore la même limite (le gain varie progressivement sur 5 ms de chaque côté d'un pic), pour que le mixage reste la somme des pistes ;
+  - les limiteurs retirent un peu de volume aux pics : un gain de rattrapage `target_lufs - I(somme limitée)` est appliqué en place à chaque fichier temporaire, et un limiteur lié entre les pistes les baisse toutes d'un même gain là où leur somme dépasse encore la même limite (le gain varie progressivement sur 5 ms de chaque côté d'un pic), pour que le mixage reste la somme des pistes ; il ne modifie que les échantillons des fichiers temporaires en flottant, bloc par bloc, en n'ouvrant chaque fichier que pour le bloc en cours, pour qu'une erreur n'en laisse jamais un ouvert ;
   - le gain commun qui reste, `target_lufs - I` de cette somme, est petit, et toujours ramené si besoin pour que le true peak reste sous `true_peak_db` ; le fichier de montage dit alors que le volume visé n'est pas atteint.
 - L'écriture du M3 coupe les fichiers temporaires limités (les voix au format de leur brut, le film à celui du film brut) et applique le gain restant à chaque piste, donc au mixage (`write_edit(..., gain_db=…)`). Le gain du fichier de montage est le total appliqué aux voix traitées : `g` + rattrapage + reste.
 - Réglages `[sound]` : `enabled = true`, `denoise = true`, `filters` (ci-dessus), `target_lufs = -16.0`, `true_peak_db = -1.0`.
@@ -87,7 +87,7 @@ La piste film n'est pas traitée. La porte et les coupes du M3 s'appliquent ensu
 ### Le fichier de montage
 
 Une nouvelle section `### Sound` :
-- la chaîne (`DeepFilterNet 3 + filters` ou `filters only`, ou `Not processed` si `enabled = false`), le gain du film et le gain commun appliqués ;
+- la chaîne (`DeepFilterNet 3 + filters` ou `filters only`, ou `Not processed` si `enabled = false`), le gain du film et le gain commun appliqués, et ce qu'a fait le limiteur lié (`Limiter: <n> passages, <s> s reduced, deepest -<dB> dB.`, ou `Limiter: no reduction.`) ;
 - un tableau par piste écrite et pour le mixage : LUFS et true peak avant (le brut) et après (le fichier écrit).
 
 ### Disque et temps

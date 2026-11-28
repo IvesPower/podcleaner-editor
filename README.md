@@ -89,7 +89,7 @@ A 2 h 10 episode weighs about 2.3 GB per track; the program checks the free disk
 
 Each voice track goes through DeepFilterNet 3 (noise and short reverb), then ffmpeg filters (high-pass, EQ, compressor); the film track is left as it is, only brought by its own gain to the voices' loudness, so its clips play at the level of the speech. Then a limiter on each track, and one linked across them so the mix stays their sum, let one gain, shared by every track and the mix, bring the mix to -16 LUFS without passing -1 dBTP; when the true peak stops it short of the target, the edit file says so. The first run downloads the DeepFilterNet model once. `--dry-run` does no sound processing.
 
-The `### Sound` section of the edit file gives the chain, the film gain, the shared gain, and the loudness and true peak of each file before and after. The `[sound]` section of the configuration sets it: `enabled`, `denoise` (`false` keeps the ffmpeg filters only), `filters` (the ffmpeg filter chain, to tune by ear), `target_lufs` (-16.0) and `true_peak_db` (-1.0).
+The `### Sound` section of the edit file gives the chain, the film gain, the shared gain, how much the linked limiter lowered (passages, seconds, deepest reduction), and the loudness and true peak of each file before and after. The `[sound]` section of the configuration sets it: `enabled`, `denoise` (`false` keeps the ffmpeg filters only), `filters` (the ffmpeg filter chain, to tune by ear), `target_lufs` (-16.0) and `true_peak_db` (-1.0).
 
 Coming next: Claude's opinions (M5).
 
