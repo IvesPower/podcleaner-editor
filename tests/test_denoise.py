@@ -1,4 +1,6 @@
 import builtins
+import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -114,6 +116,80 @@ def test_model_load_failure_is_an_editor_error(monkeypatch):
     with pytest.raises(EditorError) as info:
         denoiser(np.zeros(48000, dtype=np.float32))
     assert str(info.value) == "Could not load the DeepFilterNet model: offline"
+
+
+def test_broken_model_cache_is_an_editor_error(monkeypatch):
+    def init_df(**kwargs):
+        raise SystemExit(1)
+
+    enhance = types.ModuleType("df.enhance")
+    enhance.init_df = init_df
+    enhance.enhance = None
+    monkeypatch.setitem(sys.modules, "df", types.ModuleType("df"))
+    monkeypatch.setitem(sys.modules, "df.enhance", enhance)
+
+    with pytest.raises(EditorError) as info:
+        make_denoiser()(np.zeros(48000, dtype=np.float32))
+    assert str(info.value) == (
+        "Could not load the DeepFilterNet model: no checkpoint found in its cache"
+    )
+
+
+def test_model_error_is_an_editor_error(monkeypatch):
+    def enhance(model, state, audio):
+        raise RuntimeError("out of memory")
+
+    module = types.ModuleType("df.enhance")
+    module.init_df = lambda **kwargs: (object(), object(), "")
+    module.enhance = enhance
+    monkeypatch.setitem(sys.modules, "df", types.ModuleType("df"))
+    monkeypatch.setitem(sys.modules, "df.enhance", module)
+    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(from_numpy=lambda a: a))
+
+    with pytest.raises(EditorError) as info:
+        make_denoiser()(np.zeros(48000, dtype=np.float32))
+    assert str(info.value) == "DeepFilterNet failed: out of memory"
+
+
+class _PerCallOffset:
+    """A denoiser that adds a tenth of its call number, so each slice is recognisable."""
+
+    name = "offset"
+    rate = 48000
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, mono: np.ndarray) -> np.ndarray:
+        self.calls += 1
+        return (mono + 0.1 * self.calls).astype(np.float32)
+
+
+def test_slices_land_at_their_place(tmp_path):
+    sr = 44100
+    n = 70 * sr
+    data = _band_limited_noise(n, sr, 1)[:, 0]
+    source = tmp_path / "in.wav"
+    target = tmp_path / "out.wav"
+    sf.write(source, data, sr, subtype="FLOAT")
+
+    denoise_file(source, target, _PerCallOffset())
+
+    out, _ = sf.read(target, dtype="float64")
+    # Slices start every 29 s; the 0.5 s crossfade starts 0.25 s into each 1 s overlap.
+    # A slice shifted by one frame breaks the noise; a misplaced crossfade breaks the offsets.
+    hop, fade_at, fade = 29 * sr, sr // 4, sr // 2
+    offset = np.full(n, 0.1)
+    for k in (1, 2):
+        start = k * hop + fade_at
+        ramp = (np.arange(fade) + 0.5) / fade
+        offset[start : start + fade] = 0.1 * (k + ramp)
+        offset[start + fade :] = 0.1 * (k + 1)
+    # The offset steps at the file's own edges, where the resampling rings.
+    edge = 200
+    error = np.abs(out - (data + offset))[edge:-edge]
+    assert out.shape == (n,)
+    assert error.max() < 1e-3
 
 
 def _floor_db(x: np.ndarray, sr: int) -> float:

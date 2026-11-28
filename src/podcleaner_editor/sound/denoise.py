@@ -44,6 +44,11 @@ class _DeepFilterNet:
 
             model, state, _ = init_df(log_level="ERROR", log_file=None)
             import torch  # already loaded by df
+        except SystemExit as exc:
+            # init_df exits when its cache holds a config but no checkpoint.
+            raise EditorError(
+                "Could not load the DeepFilterNet model: no checkpoint found in its cache"
+            ) from exc
         except Exception as exc:
             raise EditorError(f"Could not load the DeepFilterNet model: {exc}") from exc
         self._model, self._state = model, state
@@ -53,7 +58,10 @@ class _DeepFilterNet:
         if self._model is None:
             self._load()
         audio = self._torch.from_numpy(np.ascontiguousarray(mono, dtype=np.float32))[None]
-        out = self._enhance(self._model, self._state, audio).numpy()[0]
+        try:
+            out = self._enhance(self._model, self._state, audio).numpy()[0]
+        except Exception as exc:
+            raise EditorError(f"DeepFilterNet failed: {exc}") from exc
         return out.astype(np.float32, copy=False)
 
 
