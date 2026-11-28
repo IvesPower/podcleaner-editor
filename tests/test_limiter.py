@@ -147,3 +147,16 @@ def test_an_unexpected_temporary_is_an_editor_error(tmp_path):
     sf.write(path, _tone(RATE, 0.3), RATE, subtype="PCM_16")
     with pytest.raises(EditorError, match="a.wav is not a 32-bit float WAV file"):
         link_limit([path], 0.8)
+
+
+def test_a_shorter_file_ending_inside_a_block(tmp_path):
+    long, short = _tone(2 * RATE, 0.3), _tone(9000, 0.3)
+    short[4000:4100] *= 3.0
+    paths = [_write(tmp_path / "l.wav", long), _write(tmp_path / "s.wav", short)]
+    link_limit(paths, 0.8, gain_db=1.0, block_s=0.25)  # 9000 is not a multiple of 2000
+    scale = 10 ** (1.0 / 20)
+    out_l, out_s = _read(paths[0])[:, 0], _read(paths[1])[:, 0]
+    assert len(out_l) == 2 * RATE and len(out_s) == 9000
+    assert np.max(np.abs(out_l[:9000] + out_s)) <= 0.8 + 1e-6
+    np.testing.assert_allclose(out_l[9000:], scale * long[9000:], atol=1e-5)
+    np.testing.assert_allclose(out_s[6000:], scale * short[6000:], atol=1e-5)

@@ -114,8 +114,11 @@ def _envelope(
 def _scale(wavs: list[_Wav], first: int, gain: np.ndarray) -> None:
     """Multiply `[first, first + len(gain))` of every file by `gain`, in place."""
     for wav in wavs:
+        if first >= wav.frames:
+            continue  # a shorter file, already ended
         with wav.path.open("r+b") as f:
-            part = _read(f, wav, first, len(gain)) * gain[: wav.frames - first, None]
+            part = _read(f, wav, first, len(gain))
+            part = part * gain[: len(part), None]
             f.seek(wav.offset + first * wav.channels * _SAMPLE_BYTES)
             f.write(part.astype("<f4").tobytes())
 
