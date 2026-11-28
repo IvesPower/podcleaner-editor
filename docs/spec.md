@@ -14,7 +14,7 @@ The tool runs on macOS and Windows and is published as open source on GitHub. It
 
 | Feature | What it does | Open source tools | What Claude adds |
 | --- | --- | --- | --- |
-| Studio sound | DeepFilterNet 3 (noise and reverb) then ffmpeg filters (high-pass, EQ, compressor) on each voice track, then a gain that brings the film to the voices' loudness, then one shared gain on every track and the mix, to -16 LUFS and -1 dBTP. WPE (`nara_wpe`) was tried and set aside: it changes almost nothing on these recordings | ffmpeg, DeepFilterNet | Choosing the settings from each track's measurements |
+| Studio sound | DeepFilterNet 3 (noise and reverb) then ffmpeg filters (high-pass, EQ, compressor) on each voice track, then a gain that brings the film to the voices' loudness, then a limiter on each track and one linked across them, then one shared gain on every track and the mix, to -16 LUFS and -1 dBTP. WPE (`nara_wpe`) was tried and set aside: it changes almost nothing on these recordings | ffmpeg, DeepFilterNet | Choosing the settings from each track's measurements |
 | Gate | On each voice track, brings the passages where the person is not speaking down to digital silence, like Logic Pro's Strip Silence (-30 dB, 0.5 s, 10 ms attack, 0.1 s release). Decided on sound level, with the bleed test, not on speech detection: laughs and breaths stay | Levels from the analysis, numpy | None |
 | Silences | Shortens to about 0.4 s every silence longer than 1 s where all tracks are quiet, with a fade | Silero VAD per track, ffmpeg | None |
 | Hesitations | Removes isolated "uh"s that don't break the sentence, flags the others | faster-whisper or mlx-whisper (word timestamps), track by track | Judging, sentence by sentence, whether a cut still sounds natural |

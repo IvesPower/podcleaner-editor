@@ -21,6 +21,7 @@ from podcleaner_editor.errors import EditorError
 from podcleaner_editor.events import Event, EventType
 from podcleaner_editor.render.markers import Marker, read_wav_markers
 from podcleaner_editor.report.markdown import AnalysisResult
+from podcleaner_editor.sound.filters import limit_filter
 from podcleaner_editor.sound.loudness import measure
 from podcleaner_editor.timeline import Interval as I
 
@@ -688,7 +689,7 @@ def _sound_lines(text: str) -> list[str]:
 
 
 def test_run_processes_the_voices_not_the_film(tmp_path, monkeypatch):
-    denoised, filtered, written, messages = [], [], [], []
+    denoised, filtered, chains, written, messages = [], [], [], [], []
     real_denoise, real_filters = pipeline.denoise_file, pipeline.apply_filters
     real_write = pipeline.write_edit
 
@@ -698,6 +699,7 @@ def test_run_processes_the_voices_not_the_film(tmp_path, monkeypatch):
 
     def filters(source, target, chain):
         filtered.append(target.name)
+        chains.append(chain)
         real_filters(source, target, chain)
 
     def write(tracks, *args, **kwargs):
@@ -729,12 +731,17 @@ def test_run_processes_the_voices_not_the_film(tmp_path, monkeypatch):
     out = _sound_run(tmp_path, monkeypatch, progress=messages.append)
 
     assert denoised == ["julien.wav", "franck.wav"]
-    assert filtered == [".ep.julien.sound.tmp.wav", ".ep.franck.sound.tmp.wav"]
+    limited = [
+        ".ep.julien.limited.sound.tmp.wav",
+        ".ep.franck.limited.sound.tmp.wav",
+        ".ep.film.sound.tmp.wav",
+    ]
+    assert filtered == [".ep.julien.sound.tmp.wav", ".ep.franck.sound.tmp.wav", *limited]
     assert len(made) == 1 and made[0].calls >= 2  # created once, for the first voice
-    [(tracks, gain)] = written
-    assert [t.source.name for t in tracks] == [*filtered, "film.wav"]
-    assert [t.subtype for t in tracks[:2]] == ["PCM_16", "PCM_16"]
-    assert gain != 0.0
+    [(tracks, rest)] = written
+    assert [t.source.name for t in tracks] == limited
+    assert [t.subtype for t in tracks] == ["PCM_16", "PCM_16", "PCM_24"]
+    assert [t.gain_db for t in tracks] == [0.0, 0.0, 0.0]  # the gains are in the temporaries
     raw = ["film.wav", "franck.wav", "julien.wav"]
     after = [["ep.julien.wav"], ["ep.franck.wav"], ["ep.film.wav"], ["ep.mix.wav"]]
     assert steps == [
@@ -745,28 +752,31 @@ def test_run_processes_the_voices_not_the_film(tmp_path, monkeypatch):
         [".ep.franck.sound.tmp.wav", ".ep.julien.sound.tmp.wav"],  # the processed voices
         ["film.wav"],
         [".ep.franck.sound.tmp.wav", ".ep.julien.sound.tmp.wav", "film.wav"],
+        sorted(limited),  # after the limiter on each track
+        sorted(limited),  # after the make-up gain and the linked limiter
         "write",
         *after,
     ]
     assert [p.name for p in out.iterdir() if ".tmp" in p.name] == []
-    assert [m for m in messages if "sound" in m or "loudness" in m or "Writing" in m] == [
+    assert [
+        m for m in messages if any(w in m for w in ("sound", "loudness", "Levelling", "Writing"))
+    ] == [
         "Processing the sound of Julien… (the DeepFilterNet model is downloaded on first use)",
         "Processing the sound of Franck…",
         "Measuring the loudness…",
+        "Levelling the tracks…",
         "Writing the edited tracks…",
         "Measuring the loudness of the written files…",
     ]
-    # The film is only scaled, by its own gain and then the shared one.
-    [film_gain_db] = [g for g in gains if g]
-    assert film_gain_db[".ep.julien.sound.tmp.wav"] == film_gain_db[".ep.franck.sound.tmp.wav"] == 0
-    fg = film_gain_db["film.wav"]
-    assert tracks[2].gain_db == fg != 0.0
-    assert [t.gain_db for t in tracks[:2]] == [0.0, 0.0]
-    film, _ = sf.read(tmp_path / "film.wav", dtype="float32")
-    out_film, _ = sf.read(out / "ep.film.wav", dtype="float32")
-    assert np.max(np.abs(out_film)) == pytest.approx(
-        np.max(np.abs(film)) * 10 ** ((fg + gain) / 20), abs=1e-4
-    )
+    # The film gets its own gain on top of the voices' gain, both before the limiter.
+    [weighted] = [g for g in gains if g]
+    assert weighted[".ep.julien.sound.tmp.wav"] == weighted[".ep.franck.sound.tmp.wav"] == 0
+    fg = weighted["film.wav"]
+    voice_gain = float(re.match(r"volume=(-?[\d.]+)dB,alimiter=", chains[2]).group(1))
+    assert chains[3] == chains[2]
+    assert chains[4] == limit_filter(fg + voice_gain, SETTINGS.sound_true_peak_db)
+    assert chains[2] == limit_filter(voice_gain, SETTINGS.sound_true_peak_db)
+    assert abs(rest) < 1.0  # only a small remainder is left to the writer
 
 
 def test_mix_reaches_the_target_loudness(tmp_path, monkeypatch):
@@ -800,15 +810,50 @@ def test_sound_disabled_gives_the_film_no_gain(tmp_path, monkeypatch):
     assert [t.gain_db for t in written[0]] == [0.0, 0.0, 0.0]
 
 
-def test_gain_capped_by_true_peak(tmp_path, monkeypatch):
-    # A quiet voice with one loud click: reaching -16 LUFS would push the click past -1 dBTP.
+def _clicky_voice(tmp_path):
+    """A quiet voice with one loud click: reaching -16 LUFS would push the click past -1 dBTP."""
     t = np.arange(30 * RATE) / RATE
     quiet = 0.01 * np.sin(2 * np.pi * 440 * t)
     quiet[5 * RATE] = 0.9
     path = tmp_path / "julien.wav"
     sf.write(path, quiet, RATE, subtype="FLOAT")
-    settings = replace(SETTINGS, speakers=("A", "B"), gate_enabled=False, sound_filters="")
-    out = _sound_run(tmp_path, monkeypatch, settings, voices=[path], film_tone=(0, 0))
+    return path
+
+
+_ONE_VOICE = replace(SETTINGS, speakers=("A", "B"), gate_enabled=False, sound_filters="")
+
+
+def test_limiter_lets_the_mix_reach_the_target(tmp_path, monkeypatch):
+    voices = [_clicky_voice(tmp_path)]
+    out = _sound_run(tmp_path, monkeypatch, _ONE_VOICE, voices=voices, film_tone=(0, 0))
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert "Target not reached" not in _sound_lines(text)[0]
+    mix = measure([out / "ep.mix.wav"])
+    assert mix.lufs == pytest.approx(-16.0, abs=0.5)
+    assert mix.true_peak_db <= -1.0
+
+
+def test_peaks_shared_by_two_voices_are_limited_together(tmp_path, monkeypatch):
+    # Each voice alone passes its limiter; their sum at the same click would not.
+    julien = _clicky_voice(tmp_path)
+    franck = tmp_path / "franck.wav"
+    franck.write_bytes(julien.read_bytes())
+    voices = [julien, franck]
+    settings = replace(SETTINGS, gate_enabled=False, sound_filters="")
+    out = _sound_run(tmp_path, monkeypatch, settings, voices=voices, film_tone=(0, 0))
+    text = (out / "ep.edit.md").read_text(encoding="utf-8")
+    assert "Target not reached" not in _sound_lines(text)[0]
+    mix = measure([out / "ep.mix.wav"])
+    assert mix.lufs == pytest.approx(-16.0, abs=0.5)
+    assert mix.true_peak_db <= -1.0
+
+
+def test_gain_capped_by_true_peak(tmp_path, monkeypatch):
+    # Without the limiters, the click holds the shared gain.
+    monkeypatch.setattr(pipeline, "limit_filter", lambda gain, peak: f"volume={gain}dB")
+    monkeypatch.setattr(pipeline, "link_limit", lambda paths, limit, gain_db: None)
+    voices = [_clicky_voice(tmp_path)]
+    out = _sound_run(tmp_path, monkeypatch, _ONE_VOICE, voices=voices, film_tone=(0, 0))
     text = (out / "ep.edit.md").read_text(encoding="utf-8")
     assert "Target not reached: true peak held at -1.0 dBTP." in _sound_lines(text)[0]
     mix = measure([out / "ep.mix.wav"])
@@ -913,8 +958,8 @@ def test_space_check_counts_the_sound_temporaries(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "check_space", check)
     with pytest.raises(EditorError, match="Not enough disk space"):
         _sound_run(tmp_path, monkeypatch)
-    # Two mono float voices of 30 s at 8 kHz, and one intermediate file at a time.
-    assert seen == [3 * (30 * RATE * 4 + 4096)]
+    # Two mono float voices of 30 s at 8 kHz, one intermediate file at a time, and the film.
+    assert seen == [4 * (30 * RATE * 4 + 4096)]
     assert not (tmp_path / "out" / ".ep.julien.sound.tmp.wav").exists()
 
 

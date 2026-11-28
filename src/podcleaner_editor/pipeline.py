@@ -45,8 +45,9 @@ from podcleaner_editor.render.writer import (
 )
 from podcleaner_editor.report.markdown import AnalysisResult, SoundInfo, render_edit_file
 from podcleaner_editor.sound.denoise import Denoiser, denoise_file, make_denoiser
-from podcleaner_editor.sound.filters import apply_filters
-from podcleaner_editor.sound.loudness import film_gain, measure, shared_gain
+from podcleaner_editor.sound.filters import apply_filters, limit_filter, limit_level
+from podcleaner_editor.sound.limiter import link_limit
+from podcleaner_editor.sound.loudness import SILENCE_LUFS, film_gain, measure, shared_gain
 from podcleaner_editor.timeline import Interval, subtract, union
 
 Decoder = Callable[[Path], np.ndarray]
@@ -312,7 +313,7 @@ def _plan(result: AnalysisResult, settings: Settings, rate: int) -> tuple[int, l
 
 
 def _sound_tmp(out_dir: Path, name: str, slug: str, step: str = "") -> Path:
-    """A temporary sound file of a voice, in the output folder."""
+    """A temporary sound file of a voice or of the film, in the output folder."""
     return out_dir / f".{name}.{slug}{step}.sound.tmp.wav"
 
 
@@ -364,12 +365,13 @@ def _render(
     progress: Callable[[str], None],
     processed: dict[str, Path] | None = None,
     gain_db: float = 0.0,
-    film_gain_db: float = 0.0,
+    film: Path | None = None,
 ) -> list[Path]:
-    """Write the edited tracks, their mix and the markers; return the files written.
+    """Write the edited tracks, their mix and the markers, every track at `gain_db`; return
+    the files written.
 
-    A voice in `processed` is cut from that copy, in its raw file's subtype. The film gets
-    `film_gain_db`, then every track `gain_db`.
+    A voice in `processed`, and the film when `film` is given, is cut from that copy, in its
+    raw file's subtype.
     """
     episode = result.episode
     name = episode.name
@@ -386,10 +388,10 @@ def _render(
             episode.voices, voice_slugs([t.label for t in episode.voices]), strict=True
         )
     ]
-    film = RenderTrack(
-        episode.film.info.path, out_dir / f"{name}.film.wav", None, gain_db=film_gain_db
+    raw_film = episode.film.info.path
+    tracks.append(
+        RenderTrack(film or raw_film, out_dir / f"{name}.film.wav", None, sf.info(raw_film).subtype)
     )
-    tracks.append(film)
     mix = out_dir / f"{name}.mix.wav"
     midi = out_dir / f"{name}.markers.mid"
 
@@ -405,6 +407,34 @@ def _render(
     return [*(t.target for t in tracks), mix, midi]
 
 
+def _level(
+    result: AnalysisResult,
+    settings: Settings,
+    out_dir: Path,
+    processed: dict[str, Path],
+    temporaries: list[Path],
+    gain_db: float,
+    film_gain_db: float,
+) -> tuple[list[Path], Path]:
+    """Each processed voice at `gain_db`, and the raw film at `film_gain_db + gain_db`, through
+    the limiter into float temporaries; return the voices' copies and the film's."""
+    episode = result.episode
+    labels = [track.label for track in episode.voices]
+    voices = []
+    for label, slug in zip(labels, voice_slugs(labels), strict=True):
+        target = _sound_tmp(out_dir, episode.name, slug, ".limited")
+        temporaries.append(target)
+        apply_filters(processed[label], target, limit_filter(gain_db, settings.sound_true_peak_db))
+        with contextlib.suppress(OSError):  # else left to the caller's cleanup
+            processed[label].unlink(missing_ok=True)
+        voices.append(target)
+    film = _sound_tmp(out_dir, episode.name, "film")
+    temporaries.append(film)
+    chain = limit_filter(film_gain_db + gain_db, settings.sound_true_peak_db)
+    apply_filters(episode.film.info.path, film, chain)
+    return voices, film
+
+
 def _render_with_sound(
     result: AnalysisResult,
     settings: Settings,
@@ -413,15 +443,16 @@ def _render_with_sound(
     denoiser: Denoiser | None,
     progress: Callable[[str], None],
 ) -> tuple[list[Path], SoundInfo]:
-    """Process the sound of each voice, then write the edit with the film at the voices' level
-    and every file at the shared gain; return the files written and what the sound stage did.
-    The temporaries are always deleted."""
+    """Process the sound of each voice, bring the film to the voices' level, then every track
+    to the target through the limiter, and write the edit at the small shared gain left;
+    return the files written and what the sound stage did. The temporaries are always
+    deleted."""
     episode = result.episode
     n_total, pieces = _plan(result, settings, rate)
     raw = [t.info.path for t in episode.tracks]
-    # The processed voices, and one intermediate file at a time when denoising.
+    # The processed voices, one more voice file at a time (denoised, or limited), the film.
     sizes = [_float_bytes(t.info.path) for t in episode.voices]
-    extra = sum(sizes) + (max(sizes) if settings.sound_denoise and sizes else 0)
+    extra = sum(sizes) + max(sizes) + _float_bytes(episode.film.info.path)
     check_space(raw, sum(p.end - p.start for p in pieces), out_dir, extra_bytes=extra)
 
     temporaries: list[Path] = []
@@ -434,15 +465,29 @@ def _render_with_sound(
         # Before the write: once the audio is written, only its own measures remain.
         befores = [measure([path]) for path in raw] + [measure(raw)]
         voices = [processed[t.label] for t in episode.voices]
-        film = episode.film.info.path
-        # The film to the voices' level first, so its loud clips do not hold the shared gain.
-        fg = film_gain(measure(voices), measure([film]))
-        gain, capped = shared_gain(
-            measure([*voices, film], gains_db=[0.0] * len(voices) + [fg]),
-            settings.sound_target_lufs,
-            settings.sound_true_peak_db,
+        raw_film = episode.film.info.path
+        # The film to the voices' level first, so its loud clips do not hold the gain.
+        fg = film_gain(measure(voices), measure([raw_film]))
+        level = measure([*voices, raw_film], gains_db=[0.0] * len(voices) + [fg])
+        gain = settings.sound_target_lufs - level.lufs if level.lufs > SILENCE_LUFS else 0.0
+        progress("Levelling the tracks…")
+        try:
+            limited, film = _level(result, settings, out_dir, processed, temporaries, gain, fg)
+            # The limiter took some loudness off the peaks: make it up, and lower all the
+            # tracks as one where they peak together.
+            level = measure([*limited, film])
+            made_up = settings.sound_target_lufs - level.lufs if level.lufs > SILENCE_LUFS else 0.0
+            link_limit([*limited, film], limit_level(settings.sound_true_peak_db), made_up)
+        except (OSError, sf.SoundFileError) as exc:
+            raise EditorError(f"Could not write to {out_dir}: {exc}") from exc
+        # What is left is small, and still held by the true peak.
+        rest, capped = shared_gain(
+            measure([*limited, film]), settings.sound_target_lufs, settings.sound_true_peak_db
         )
-        outputs = _render(result, settings, out_dir, pieces, n_total, progress, processed, gain, fg)
+        levelled = {t.label: path for t, path in zip(episode.voices, limited, strict=True)}
+        outputs = _render(
+            result, settings, out_dir, pieces, n_total, progress, levelled, rest, film
+        )
     finally:
         for path in temporaries:
             with contextlib.suppress(OSError):
@@ -455,7 +500,13 @@ def _render_with_sound(
     )
     chain = "DeepFilterNet 3 + filters" if settings.sound_denoise else "filters only"
     info = SoundInfo(
-        chain, fg, gain, capped, rows, settings.sound_target_lufs, settings.sound_true_peak_db
+        chain,
+        fg,
+        gain + made_up + rest,
+        capped,
+        rows,
+        settings.sound_target_lufs,
+        settings.sound_true_peak_db,
     )
     return outputs, info
 
@@ -472,8 +523,9 @@ def run(
     """Analyses the episode and writes `<out_dir>/<name>.edit.md`, and without `dry_run` the
     edited tracks, their mix and the markers.
 
-    With `[sound] enabled`, each voice gets the studio sound first (the film is kept raw), the
-    film is brought to the voices' loudness, and every file is written at one shared gain.
+    With `[sound] enabled`, each voice gets the studio sound first (the film only gets a gain),
+    the film is brought to the voices' loudness, and every track is brought to the target through
+    a limiter, so every file is written at one shared gain.
     `denoiser` defaults to `make_denoiser`, created only when a voice is denoised.
 
     Returns the edit file, then the other files written. The edit file is written last.
